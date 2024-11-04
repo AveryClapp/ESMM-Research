@@ -4,9 +4,6 @@
  * Helper file for common functions (creating matrices, CEIL_DIV)
  */
 
-// CEIL_DIV Operation
-#define CEIL_DIV(M, N) ((M) + (N)-1) / (N)
-
 void cudaCheck(cudaError_t error, const char *file, int line) {
   if (error != cudaSuccess) {
     printf("[CUDA ERROR] at file %s(line %d):\n%s\n", file, line, cudaGetErrorString(error));
@@ -19,7 +16,7 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 void randomize_matrix_with_pattern(float *mat, int M, int N, std::vector<int> pattern) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
-      int pattern_idx = (i * N + j) % pattern_length;
+      int pattern_idx = (i * N + j) % PATTERN_LENGTH;
       if (pattern[pattern_idx] == 1) {
         float tmp = (float)(rand() % 5) + 0.01 * (rand() % 5);
         tmp = (rand() % 2 == 0) ? tmp : tmp * (-1.);

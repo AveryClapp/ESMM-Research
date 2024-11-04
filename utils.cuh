@@ -1,8 +1,9 @@
 #ifndef UTILS_CUH
 #define UTILS_CUH
 #include <vector>
-
+#include <cuda_runtime.h>
 #define CEIL_DIV(M,N) ((M) + (N) - 1) / (N)
+#define PATTERN_LENGTH 8
 
 void cudaCheck(cudaError_t error, const char *file, int line);
 

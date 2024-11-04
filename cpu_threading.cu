@@ -18,37 +18,37 @@
 // For every row in A (also C), create 32 threads so that each thread goes through 8 (B_COLS). This will allow for one whole row of 
 // C to be computed per thread spawn. This will eventually be lifted/modified to a CUDA implementation where you launch one warp
 // to compute a whole row of C.
-void computeRowContribution(float* A, float* B, float* partialC, int rowB) {
-  for(int i = 0; i < A_ROWS; ++i) {
-    for(int j = 0; j < B_COLS; ++j) {
-      partialC[i * C_COLS + j] += A[i * A_COLS + rowB] * B[rowB * B_COLS + j];
+void processRows(const float* __restrict__ A,
+                  const float* __restrict__ B,
+                  float* __restrict__ C,
+                  const int startRow,
+                  const int numRows) {
+  for (int row = startRow; row < startRow + numRows; ++row) {
+    for (int j = 0; j < 8; ++j) {
+      C[row * 8 + j] = 0;
+      for (int k = 0; k < 32; ++k) {
+        C[row * 8 + j] += A[row * 32 + k] * B[k * 8 + j];
+      }
     }
   }
 }
 
-void threadedMatrixMultiplication(float* A, float* B, float* C) {
-  std::vector<std::thread> allThreads;
-  allThreads.reserve(B_ROWS);
-  std::vector<float*> partialCs(B_ROWS, nullptr);
-  for(int k = 0; k < B_ROWS; ++k) {
-    partialCs[k] = new float[C_ROWS * C_COLS];
-    std::memset(partialCs[k], 0, sizeof(float) * C_ROWS * C_COLS);
+void threadedMatrixMultiplication(const float* __restrict__ A,
+                                    const float* __restrict__ B,
+                                    float* __restrict__ C) {
+  std::vector<std::thread> threads(32);
+  const int rowsPerThread = 32;
+
+  for (int t = 0; t < 32; ++t) {
+    int startRow = t * rowsPerThread;
+    threads[t] = std::thread(processRows, A, B, C, startRow, rowsPerThread);
   }
-  for(int k = 0; k < B_ROWS; ++k) {
-    allThreads.emplace_back(computeRowContribution, A, B, partialCs[k], k);
-  }
-  for(auto& thread : allThreads) {
+
+  for (auto& thread : threads) {
     thread.join();
   }
-  for(int k = 0; k < B_ROWS; ++k) {
-    for(int i = 0; i < C_ROWS; ++i) {
-      for(int j = 0; j < C_COLS; ++j) {
-        C[i * C_COLS + j] += partialCs[k][i * C_COLS + j];
-      }
-    }
-    delete[] partialCs[k];
-  }
 }
+
 int main() {
   float *A = new float[A_ROWS * A_COLS];
   float *B = new float[B_ROWS * B_COLS];

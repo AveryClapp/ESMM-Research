@@ -1,8 +1,16 @@
+#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
 #include <cuda_runtime.h>
-#include <cmath>
-#include <iostream>
 #include "utils.cuh"
-#include <iostream>
+// Error checking macro
+#define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
+inline void cudaAssert(cudaError_t code, const char *file, int line) {
+  if (code != cudaSuccess) {
+    fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file, line);
+    exit(code);
+  }
+}
 
 #define A_ROWS 1024
 #define A_COLS 32
@@ -11,93 +19,105 @@
 #define C_ROWS 1024
 #define C_COLS 8
 
-__global__ void matrixMultiply(const float* A, const float* B, float* C) {
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
-      if (row < 1024) {
-            for (int j = 0; j < 8; j++) {
-                    float sum = 0.0f;
-                          for (int k = 0; k < 32; k++) {
-                                    sum += A[row * 32 + k] * B[k * 8 + j];
-                                          }
-                                C[row * 8 + j] = sum;
-                                    }
-              }
-
+__global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
+  // Each thread handles one row of B
+  int b_row = threadIdx.x + blockIdx.x * blockDim.x;
+  if (b_row < B_ROWS) {
+    float b_elements[8] = {
+      B[b_row * B_COLS + 0],
+      B[b_row * B_COLS + 1],
+      B[b_row * B_COLS + 2],
+      B[b_row * B_COLS + 3],
+      B[b_row * B_COLS + 4],
+      B[b_row * B_COLS + 5],
+      B[b_row * B_COLS + 6],
+      B[b_row * B_COLS + 7]
+    };
+    for (int a_row = 0; a_row < A_ROWS; a_row++) {
+      float a_element = A[a_row * A_COLS + b_row];
+      atomicAdd(&C[a_row * C_COLS + 0], a_element * b_elements[0]);
+      atomicAdd(&C[a_row * C_COLS + 1], a_element * b_elements[1]);
+      atomicAdd(&C[a_row * C_COLS + 2], a_element * b_elements[2]);
+      atomicAdd(&C[a_row * C_COLS + 3], a_element * b_elements[3]);
+      atomicAdd(&C[a_row * C_COLS + 4], a_element * b_elements[4]);
+      atomicAdd(&C[a_row * C_COLS + 5], a_element * b_elements[5]);
+      atomicAdd(&C[a_row * C_COLS + 6], a_element * b_elements[6]);
+      atomicAdd(&C[a_row * C_COLS + 7], a_element * b_elements[7]);
+    }
+  }
 }
+
+void matrixMultiplyCPU(float* A, float* B, float* C) {
+  for (int row = 0; row < A_ROWS; row++) {
+    for (int col = 0; col < B_COLS; col++) {
+      float sum = 0.0f;
+      for (int i = 0; i < A_COLS; i++) {
+        sum += A[row * A_COLS + i] * B[i * B_COLS + col];
+      }
+      C[row * C_COLS + col] = sum;
+    }
+  }
+}
+
+// Verify results
+bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance = 1e-5) {
+  for (int i = 0; i < size; i++) {
+    if (fabs(gpuResult[i] - cpuResult[i]) > tolerance) {
+      printf("Mismatch at position %d: GPU = %f, CPU = %f\n", 
+          i, gpuResult[i], cpuResult[i]);
+      return false;
+    }
+  }
+  return true;
+}
+
 int main() {
-  float *A, *B, *C, *C_cpu;
+  float *h_A = (float*)malloc(A_ROWS * A_COLS * sizeof(float));
+  float *h_B = (float*)malloc(B_ROWS * B_COLS * sizeof(float));
+  float *h_C = (float*)malloc(C_ROWS * C_COLS * sizeof(float));
+  float *h_C_cpu = (float*)malloc(C_ROWS * C_COLS * sizeof(float));
+
+  randomize_matrix(h_A, A_ROWS, A_COLS);
+  randomize_matrix(h_B, B_ROWS, B_COLS);
+
   float *d_A, *d_B, *d_C;
+  cudaCheckError(cudaMalloc(&d_A, A_ROWS * A_COLS * sizeof(float)));
+  cudaCheckError(cudaMalloc(&d_B, B_ROWS * B_COLS * sizeof(float)));
+  cudaCheckError(cudaMalloc(&d_C, C_ROWS * C_COLS * sizeof(float)));
 
+  cudaCheckError(cudaMemcpy(d_A, h_A, A_ROWS * A_COLS * sizeof(float), cudaMemcpyHostToDevice));
+  cudaCheckError(cudaMemcpy(d_B, h_B, B_ROWS * B_COLS * sizeof(float), cudaMemcpyHostToDevice));
+
+  int threadsPerBlock = 32;  
+  int blocksPerGrid = CEIL_DIV(B_ROWS, threadsPerBlock);
   cudaFree(0);
-  A = (float*)malloc(1024 * 32 * sizeof(float));
-  B = (float*)malloc(32 * 8 * sizeof(float));
-  C = (float*)malloc(1024 * 8 * sizeof(float));
-  C_cpu = (float*)malloc(1024 * 8 * sizeof(float));
-
-  randomize_matrix(A, 1024, 32);
-  randomize_matrix(B, 32, 8);
-
-  cudaMalloc(&d_A, 1024 * 32 * sizeof(float));
-  cudaMalloc(&d_B, 32 * 8 * sizeof(float));
-  cudaMalloc(&d_C, 1024 * 8 * sizeof(float));
-
-  cudaMemcpy(d_A, A, 1024 * 32 * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_B, B, 32 * 8 * sizeof(float), cudaMemcpyHostToDevice);
-  
-  int threadsPerBlock = 32;
-  int blocksPerGrid = (1024 + threadsPerBlock - 1) / threadsPerBlock;
+  cudaMemset(d_C, 0, C_ROWS * C_COLS * sizeof(float));
 
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  matrixMultiply<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C);
+  matrixMultiplyKernel<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C);
   cudaEventRecord(stop);
-
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    fprintf(stderr, "Failed to launch matrixMultiply kernel (error code %s)!\n", cudaGetErrorString(err));
-    exit(EXIT_FAILURE);
-  }
   cudaEventSynchronize(stop);
-  cudaMemcpy(C, d_C, 1024 * 8 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaCheckError(cudaMemcpy(h_C, d_C, C_ROWS * C_COLS * sizeof(float), cudaMemcpyDeviceToHost));
+
   float time = 0.0f;
   cudaEventElapsedTime(&time, start, stop);
 
-  for (int i = 0; i < 1024; i++) {
-    for (int j = 0; j < 8; j++) {
-      C_cpu[i * 8 + j] = 0.0f; // Initialize C_cpu[i][j] to zero
-      for (int k = 0; k < 32; k++) {
-        C_cpu[i * 8 + j] += A[i * 32 + k] * B[k * 8 + j];
-      }
-    }
-  }
-
-  bool correct = true;
-  for (int i = 0; i < 1024; i++) {
-    for (int j = 0; j < 8; j++) {
-      if (fabs(C[i * 8 + j] - C_cpu[i * 8 + j]) > 1e-4) { 
-        std::cout << C[i * 8 + j] << C_cpu[i * 8 + j] << std::endl;
-        correct = false; // Matrices are not equal
-        break; // Exit the inner loop if a discrepancy is found
-      }
-    }
-    if (!correct) break; // Exit the outer loop if a discrepancy is found
-  }
-
-  if (correct) {
-    std::cout << "Matrix multiplication is correct!" << std::endl;
-  } else {
-    std::cout << "Matrix multiplication is incorrect!" << std::endl;
-  }
-
   std::cout << "GPU Timing: " << time << " ms" << std::endl;
+  matrixMultiplyCPU(h_A, h_B, h_C_cpu);
+
+  bool correct = verifyResults(h_C, h_C_cpu, C_ROWS * C_COLS);
+  printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+
+  free(h_A);
+  free(h_B);
+  free(h_C);
+  free(h_C_cpu);
   cudaFree(d_A);
   cudaFree(d_B);
   cudaFree(d_C);
-  free(A);
-  free(B);
-  free(C);
 
   return 0;
 }

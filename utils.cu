@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <vector>
 #include "utils.cuh"
 /*
  * Helper file for common functions (creating matrices, CEIL_DIV)
@@ -39,6 +40,15 @@ void randomize_matrix(float *mat, int M, int N) {
   }
 }
 
+//Generate the pattern vector
+std::vector<int> stringToVector(const std::string& str) {
+  std::vector<int> vec;
+  vec.reserve(str.length());
+  for (char c : str) {
+    vec.push_back(c - '0');
+  }
+  return vec;
+}
 
 void print_matrix(const float *A, int M, int N) {
   int i;

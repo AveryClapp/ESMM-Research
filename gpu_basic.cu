@@ -21,8 +21,9 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 
 __global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
   // Each thread handles one row of B
-  int b_row = threadIdx.x + blockIdx.x * blockDim.x;
+  int b_row = threadIdx.x;
   if (b_row < B_ROWS) {
+    // TODO memory coalescing
     float b_elements[8] = {
       B[b_row * B_COLS + 0],
       B[b_row * B_COLS + 1],
@@ -33,17 +34,16 @@ __global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
       B[b_row * B_COLS + 6],
       B[b_row * B_COLS + 7]
     };
-    for (int a_row = 0; a_row < A_ROWS; a_row++) {
-      float a_element = A[a_row * A_COLS + b_row];
-      atomicAdd(&C[a_row * C_COLS + 0], a_element * b_elements[0]);
-      atomicAdd(&C[a_row * C_COLS + 1], a_element * b_elements[1]);
-      atomicAdd(&C[a_row * C_COLS + 2], a_element * b_elements[2]);
-      atomicAdd(&C[a_row * C_COLS + 3], a_element * b_elements[3]);
-      atomicAdd(&C[a_row * C_COLS + 4], a_element * b_elements[4]);
-      atomicAdd(&C[a_row * C_COLS + 5], a_element * b_elements[5]);
-      atomicAdd(&C[a_row * C_COLS + 6], a_element * b_elements[6]);
-      atomicAdd(&C[a_row * C_COLS + 7], a_element * b_elements[7]);
-    }
+    // How do we not use atomic add here?
+    float a_element = A[blockIdx.x * A_COLS + b_row];
+    atomicAdd(&C[blockIdx.x * C_COLS + 0], a_element * b_elements[0]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 1], a_element * b_elements[1]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 2], a_element * b_elements[2]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 3], a_element * b_elements[3]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 4], a_element * b_elements[4]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 5], a_element * b_elements[5]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 6], a_element * b_elements[6]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 7], a_element * b_elements[7]);
   }
 }
 
@@ -88,16 +88,16 @@ int main() {
   cudaCheckError(cudaMemcpy(d_A, h_A, A_ROWS * A_COLS * sizeof(float), cudaMemcpyHostToDevice));
   cudaCheckError(cudaMemcpy(d_B, h_B, B_ROWS * B_COLS * sizeof(float), cudaMemcpyHostToDevice));
 
-  int threadsPerBlock = 32;  
-  int blocksPerGrid = CEIL_DIV(B_ROWS, threadsPerBlock);
   cudaFree(0);
   cudaMemset(d_C, 0, C_ROWS * C_COLS * sizeof(float));
 
+  dim3 gridDim(1024,1);
+  dim3 blockDim(32,1);
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  matrixMultiplyKernel<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C);
+  matrixMultiplyKernel<<<gridDim, blockDim>>>(d_A, d_B, d_C);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaCheckError(cudaMemcpy(h_C, d_C, C_ROWS * C_COLS * sizeof(float), cudaMemcpyDeviceToHost));

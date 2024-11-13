@@ -15,7 +15,7 @@
 
 
 __global__ void kernel11111111(float*A, float*B, float* C) {
-  int b_row = threadIdx.x + blockIdx.x * blockDim.x;
+  int b_row = threadIdx.x;
   if (b_row < B_ROWS) {
     float b_elements[8] = {
       B[b_row * B_COLS + 0],
@@ -27,49 +27,43 @@ __global__ void kernel11111111(float*A, float*B, float* C) {
       B[b_row * B_COLS + 6],
       B[b_row * B_COLS + 7]
     };
-    for (int a_row = 0; a_row < A_ROWS; a_row++) {
-      float a_element = A[a_row * A_COLS + b_row];
-      atomicAdd(&C[a_row * C_COLS + 0], a_element * b_elements[0]);
-      atomicAdd(&C[a_row * C_COLS + 1], a_element * b_elements[1]);
-      atomicAdd(&C[a_row * C_COLS + 2], a_element * b_elements[2]);
-      atomicAdd(&C[a_row * C_COLS + 3], a_element * b_elements[3]);
-      atomicAdd(&C[a_row * C_COLS + 4], a_element * b_elements[4]);
-      atomicAdd(&C[a_row * C_COLS + 5], a_element * b_elements[5]);
-      atomicAdd(&C[a_row * C_COLS + 6], a_element * b_elements[6]);
-      atomicAdd(&C[a_row * C_COLS + 7], a_element * b_elements[7]);
-    }
+    float a_element = A[blockIdx.x * A_COLS + b_row];
+    atomicAdd(&C[blockIdx.x * C_COLS + 0], a_element * b_elements[0]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 1], a_element * b_elements[1]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 2], a_element * b_elements[2]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 3], a_element * b_elements[3]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 4], a_element * b_elements[4]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 5], a_element * b_elements[5]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 6], a_element * b_elements[6]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 7], a_element * b_elements[7]);
   }
 }
 
 __global__ void kernel10101010(float*A, float*B, float* C) {
-  int b_row = threadIdx.x + blockIdx.x * blockDim.x;
+  int b_row = threadIdx.x;
   if (b_row < B_ROWS) {
-    float b_elements[8] = {
+    float b_elements[4] = {
       B[b_row * B_COLS + 0],
       B[b_row * B_COLS + 2],
       B[b_row * B_COLS + 4],
       B[b_row * B_COLS + 6],
     };
-    for (int a_row = 0; a_row < A_ROWS; a_row++) {
-      float a_element = A[a_row * A_COLS + b_row];
-      atomicAdd(&C[a_row * C_COLS + 0], a_element * b_elements[0]);
-      atomicAdd(&C[a_row * C_COLS + 2], a_element * b_elements[2]);
-      atomicAdd(&C[a_row * C_COLS + 4], a_element * b_elements[4]);
-      atomicAdd(&C[a_row * C_COLS + 6], a_element * b_elements[6]);
-    }
+    float a_element = A[blockIdx.x * A_COLS + b_row];
+    atomicAdd(&C[blockIdx.x * C_COLS + 0], a_element * b_elements[0]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 2], a_element * b_elements[1]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 4], a_element * b_elements[2]);
+    atomicAdd(&C[blockIdx.x * C_COLS + 6], a_element * b_elements[3]);
   }
 }
 
 __global__ void kernel00000010(float*A, float*B, float* C) {
-  int b_row = threadIdx.x + blockIdx.x * blockDim.x;
+  int b_row = threadIdx.x;
   if (b_row < B_ROWS) {
-    float b_elements[8] = {
+    float b_elements[1] = {
       B[b_row * B_COLS + 6],
     };
-    for (int a_row = 0; a_row < A_ROWS; a_row++) {
-      float a_element = A[a_row * A_COLS + b_row];
-      atomicAdd(&C[a_row * C_COLS + 6], a_element * b_elements[6]);
-    }
+    float a_element = A[blockIdx.x * A_COLS + b_row];
+    atomicAdd(&C[blockIdx.x * C_COLS + 6], a_element * b_elements[0]);
   }
 }
 
@@ -114,7 +108,6 @@ int main() {
   cudaMalloc(&d_A, A_ROWS * A_COLS * sizeof(float));
   cudaMalloc(&d_B, B_ROWS * B_COLS * sizeof(float));
   cudaMalloc(&d_C, C_ROWS * C_COLS * sizeof(float));
-  cudaFree(0);
   for (size_t p = 0; p < patterns.size(); ++p) {
     std::string pattern = patterns[p];
     std::vector<int> nzColumns = stringToVector(pattern);
@@ -134,11 +127,12 @@ int main() {
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    int threadsPerBlock = 32;
-    int blocksPerGrid = CEIL_DIV(B_ROWS, threadsPerBlock);
-
+    dim3 gridDim(1024,1);
+    dim3 blockDim(32,1);
+    // 1024 blocks launched with 32 threads each
+    cudaFree(0);
     cudaEventRecord(start);
-    kernel<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C);
+    kernel<<<gridDim, blockDim>>>(d_A, d_B, d_C);
     cudaEventRecord(stop);
 
     cudaEventSynchronize(stop);

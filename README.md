@@ -1,6 +1,4 @@
 # MMMResearch
 ## TODO
-- [x] Basic CPU Implementation of Matrix multipication on the desired structure
-- [x] CPU implementation with threading on the middle loop
-- [x] CUDA Implementation on smaller arrays, probably no sparsity
-- [ ] CUDA Implementation on specific sparsities, larger arrays
+- [ ] Get rid of Atomic Add
+- [ ] Shared Memory/Memory Optimizations

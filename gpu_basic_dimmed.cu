@@ -26,17 +26,17 @@ __global__ void matrixMultiplyKernel(float* A, float* B, float* C, int bTileSize
   int b_row = threadIdx.x;
   if (b_row < B_ROWS) {
     // Store all the elements that this thread will process (next 4 elements (inclusive))
-    float thread_elements[8] = {
-      B[b_row * B_COLS + (b_col * bTileSize) + 0],
-      B[b_row * B_COLS + (b_col * bTileSize) + 1],
-      B[b_row * B_COLS + (b_col * bTileSize) + 2],
-      B[b_row * B_COLS + (b_col * bTileSize) + 3],
+    float thread_elements[4] = {
+      B[b_row * B_COLS + (b_col) + 0],
+      B[b_row * B_COLS + (b_col) + 1],
+      B[b_row * B_COLS + (b_col) + 2],
+      B[b_row * B_COLS + (b_col) + 3],
     };
     float a_element = A[row * A_COLS + b_row];
-    atomicAdd(&C[row * C_COLS + 0], a_element * thread_elements[0]);
-    atomicAdd(&C[row * C_COLS + 1], a_element * thread_elements[1]);
-    atomicAdd(&C[row * C_COLS + 2], a_element * thread_elements[2]);
-    atomicAdd(&C[row * C_COLS + 3], a_element * thread_elements[3]);
+    atomicAdd(&C[row * C_COLS + (b_col) + 0], a_element * thread_elements[0]);
+    atomicAdd(&C[row * C_COLS + (b_col) + 1], a_element * thread_elements[1]);
+    atomicAdd(&C[row * C_COLS + (b_col) + 2], a_element * thread_elements[2]);
+    atomicAdd(&C[row * C_COLS + (b_col) + 3], a_element * thread_elements[3]);
   }
 }
 

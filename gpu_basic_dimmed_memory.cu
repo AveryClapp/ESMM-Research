@@ -18,37 +18,42 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 #define B_COLS 8
 #define C_ROWS 1024
 #define C_COLS 8
-/*
-In order for us not to use atomicadd, we need to make sure that indices in C are being written to one at a time and
-there are no race conditions. One way to do this is to have one thread be purely responsible for one index in C, 
-which would require the thread to go across a row of A and down a col of B. This would drastically change the 
-architecture of the problem we are trying to solve as we would then be launching 8 threads per block instead of 32,
-this is inefficient as warp sizes are 32 at the smallest, so we're just wasting the overhead of 24 threads here. 
-TLDR: one thread cant compute one index in C. So the ONLY other option is that we need to modify accesses to ensure
-that one thread operates on one index of C. Since each kernel launch only considers one row of C, we need to only
-consider one kernel (since muktiple kernels won't overlap with eachother as they only write to one row of C).
-If this is the case, we need to somehow make acceses such that, 32 threads never access the same index in a row of
-8. Hmm.... A thread accesses the index of C based on which column it is on. Pigeonhole principle tells us this is
-impossible. 32 threads, 8 columns, impossible. So, as long as threads > columns, you can't eliminate atomic add.
-*/
+
 __global__ void matrixMultiplyKernel(float* A, float* B, float* C, int bTileSize, int aTileSize) {
-  // Each thread handles one row of B
-  int row = (blockIdx.y * blockDim.x + blockIdx.x) + (blockIdx.z * aTileSize);
-  int b_col = bTileSize * threadIdx.y;
+  extern __shared__ float shared_B[];
+
+  // Thread and block mapping
+  int row = (blockIdx.y * blockDim.x + blockIdx.x) + (blockIdx.z * aTileSize); 
   int b_row = threadIdx.x;
-  if (b_row < B_ROWS) {
-    // Store all the elements that this thread will process (next 4 elements (inclusive))
-    float thread_elements[4] = {
-      B[b_row * B_COLS + (b_col) + 0],
-      B[b_row * B_COLS + (b_col) + 1],
-      B[b_row * B_COLS + (b_col) + 2],
-      B[b_row * B_COLS + (b_col) + 3],
-    };
-    float a_element = A[row * A_COLS + b_row];
-    atomicAdd(&C[row * C_COLS + (b_col) + 0], a_element * thread_elements[0]);
-    atomicAdd(&C[row * C_COLS + (b_col) + 1], a_element * thread_elements[1]);
-    atomicAdd(&C[row * C_COLS + (b_col) + 2], a_element * thread_elements[2]);
-    atomicAdd(&C[row * C_COLS + (b_col) + 3], a_element * thread_elements[3]);
+  int b_col_base = bTileSize * threadIdx.y; 
+
+  if (row < A_ROWS) {
+    // Load B tile into shared memory
+    for (int col_offset = 0; col_offset < bTileSize; ++col_offset) {
+      int b_col = b_col_base + col_offset;
+      if (b_row < A_COLS && b_col < B_COLS) {
+        shared_B[b_row * bTileSize + col_offset] = B[b_row * B_COLS + b_col];
+      } else {
+        shared_B[b_row * bTileSize + col_offset] = 0.0f;
+      }
+    }
+    __syncthreads();
+
+    float result = 0.0f;
+    if (b_row < A_COLS) {
+      float a_element = A[row * A_COLS + b_row];
+      for (int col_offset = 0; col_offset < bTileSize; ++col_offset) {
+        result += a_element * shared_B[b_row * bTileSize + col_offset];
+      }
+    }
+    __syncthreads();
+
+    for (int col_offset = 0; col_offset < bTileSize; ++col_offset) {
+      int c_col = b_col_base + col_offset;
+      if (row < A_ROWS && c_col < B_COLS) {
+        atomicAdd(&C[row * B_COLS + c_col], result);
+      }
+    }
   }
 }
 

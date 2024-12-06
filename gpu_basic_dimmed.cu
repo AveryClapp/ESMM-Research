@@ -34,21 +34,28 @@ impossible. 32 threads, 8 columns, impossible. So, as long as threads > columns,
 __global__ void matrixMultiplyKernel(float* A, float* B, float* C, int bTileSize, int aTileSize) {
   // Each thread handles one row of B
   int row = (blockIdx.y * blockDim.x + blockIdx.x) + (blockIdx.z * aTileSize);
-  int b_col = bTileSize * threadIdx.y;
   int b_row = threadIdx.x;
   if (b_row < B_ROWS) {
     // Store all the elements that this thread will process (next 4 elements (inclusive))
-    float thread_elements[4] = {
-      B[b_row * B_COLS + (b_col) + 0],
-      B[b_row * B_COLS + (b_col) + 1],
-      B[b_row * B_COLS + (b_col) + 2],
-      B[b_row * B_COLS + (b_col) + 3],
+    float thread_elements[8] = {
+      B[b_row * B_COLS + 0],
+      B[b_row * B_COLS + 1],
+      B[b_row * B_COLS + 2],
+      B[b_row * B_COLS + 3],
+      B[b_row * B_COLS + 4],
+      B[b_row * B_COLS + 5],
+      B[b_row * B_COLS + 6],
+      B[b_row * B_COLS + 7]
     };
     float a_element = A[row * A_COLS + b_row];
-    atomicAdd(&C[row * C_COLS + (b_col) + 0], a_element * thread_elements[0]);
-    atomicAdd(&C[row * C_COLS + (b_col) + 1], a_element * thread_elements[1]);
-    atomicAdd(&C[row * C_COLS + (b_col) + 2], a_element * thread_elements[2]);
-    atomicAdd(&C[row * C_COLS + (b_col) + 3], a_element * thread_elements[3]);
+    atomicAdd(&C[row * C_COLS + 0], a_element * thread_elements[0]);
+    atomicAdd(&C[row * C_COLS + 1], a_element * thread_elements[1]);
+    atomicAdd(&C[row * C_COLS + 2], a_element * thread_elements[2]);
+    atomicAdd(&C[row * C_COLS + 3], a_element * thread_elements[3]);
+    atomicAdd(&C[row * C_COLS + 4], a_element * thread_elements[4]);
+    atomicAdd(&C[row * C_COLS + 5], a_element * thread_elements[5]);
+    atomicAdd(&C[row * C_COLS + 6], a_element * thread_elements[6]);
+    atomicAdd(&C[row * C_COLS + 7], a_element * thread_elements[7]);
   }
 }
 
@@ -97,7 +104,7 @@ int main() {
   cudaMemset(d_C, 0, C_ROWS * C_COLS * sizeof(float));
 
   dim3 gridDim(32,16,2);
-  dim3 blockDim(32,2);
+  dim3 blockDim(32,1);
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
@@ -114,7 +121,6 @@ int main() {
   matrixMultiplyCPU(h_A, h_B, h_C_cpu);
 
   bool correct = verifyResults(h_C, h_C_cpu, C_ROWS * C_COLS);
-  printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 
   free(h_A);
   free(h_B);

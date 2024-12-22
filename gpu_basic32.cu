@@ -18,28 +18,45 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 #define B_COLS 32
 #define C_ROWS 1024
 #define C_COLS 32
+#define TILE_SIZE 32
 
 __global__ void matrixMultiplyKernelSHMEM(float* A, float* B, float* C) {
-     // Each thread handles one row of B
-  int b_row = threadIdx.x;
-  if (b_row < B_ROWS) {
-    // How do we not use atomic add here?
-    float a_element = A[blockIdx.x * A_COLS + b_row];
-    for (int j = 0; j < B_COLS; j++) {
-      int b_col = (threadIdx.x + j) % B_COLS;
-      C[blockIdx.x * C_COLS + b_col] += a_element * B[b_row * B_COLS + b_col];
-    }
-  }
+  __shared__ float sharedB[TILE_SIZE][TILE_SIZE];
 
+  int b_row = threadIdx.x;
+  int row = blockIdx.x;
+
+  float a_element = (b_row < A_COLS) ? A[row * A_COLS + b_row] : 0.0f;
+
+  for (int t = 0; t < (B_COLS + TILE_SIZE - 1) / TILE_SIZE; t++) {
+    int b_col = t * TILE_SIZE + threadIdx.y;
+
+    if (b_row < A_COLS && b_col < B_COLS) {
+      sharedB[threadIdx.x][threadIdx.y] = B[b_row * B_COLS + b_col];
+    } else {
+      sharedB[threadIdx.x][threadIdx.y] = 0.0f;
+    }
+
+    __syncthreads();
+
+    for (int j = 0; j < TILE_SIZE; j++) {
+      int col = t * TILE_SIZE + j;
+      if (col < B_COLS) {
+        C[row * B_COLS + col] += a_element * sharedB[b_row][j];
+      }
+    }
+
+    __syncthreads();
+  }
 }
 
 
 __global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
   // Each thread handles one row of B
   int b_row = threadIdx.x;
+  int row = blockIdx.y * blockDim.x + blockIdx.x;
   if (b_row < B_ROWS) {
-    // How do we not use atomic add here?
-    float a_element = A[blockIdx.x * A_COLS + b_row];
+    float a_element = A[row * A_COLS + b_row];
     for (int j = 0; j < B_COLS; j++) {
       int b_col = (threadIdx.x + j) % B_COLS;
       C[blockIdx.x * C_COLS + b_col] += a_element * B[b_row * B_COLS + b_col];
@@ -91,13 +108,13 @@ int main() {
   cudaFree(0);
   cudaMemset(d_C, 0, C_ROWS * C_COLS * sizeof(float));
 
-  dim3 gridDim(1024,1);
-  dim3 blockDim(32,1);
+  dim3 gridDim(1024);
+  dim3 blockDim(32);
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  matrixMultiplyKernel<<<gridDim, blockDim>>>(d_A, d_B, d_C);
+  matrixMultiplyKernelSHMEM<<<gridDim, blockDim>>>(d_A, d_B, d_C);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaCheckError(cudaMemcpy(h_C, d_C, C_ROWS * C_COLS * sizeof(float), cudaMemcpyDeviceToHost));

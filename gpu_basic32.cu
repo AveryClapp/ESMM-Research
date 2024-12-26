@@ -21,33 +21,27 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 #define TILE_SIZE 32
 
 __global__ void matrixMultiplyKernelSHMEM(float* A, float* B, float* C) {
-  __shared__ float sharedB[TILE_SIZE][TILE_SIZE];
+  __shared__ float BTileSHMEM[TILE_SIZE][TILE_SIZE];
 
   int b_row = threadIdx.x;
-  int row = blockIdx.x;
+  int row = blockIdx.y * blockDim.x + blockIdx.x;
 
-  float a_element = (b_row < A_COLS) ? A[row * A_COLS + b_row] : 0.0f;
-
-  for (int t = 0; t < (B_COLS + TILE_SIZE - 1) / TILE_SIZE; t++) {
-    int b_col = t * TILE_SIZE + threadIdx.y;
-
-    if (b_row < A_COLS && b_col < B_COLS) {
-      sharedB[threadIdx.x][threadIdx.y] = B[b_row * B_COLS + b_col];
-    } else {
-      sharedB[threadIdx.x][threadIdx.y] = 0.0f;
+  if (b_row < B_ROWS) {
+    for (int j = 0; j < B_COLS; j++) {
+      BTileSHMEM[b_row][j] = B[b_row * B_COLS + j];
     }
-
-    __syncthreads();
-
-    for (int j = 0; j < TILE_SIZE; j++) {
-      int col = t * TILE_SIZE + j;
-      if (col < B_COLS) {
-        C[row * B_COLS + col] += a_element * sharedB[b_row][j];
-      }
-    }
-
-    __syncthreads();
   }
+
+  __syncthreads();
+
+  if (b_row < B_ROWS) {
+    float a_element = A[row * A_COLS + b_row];
+    for (int j = 0; j < B_COLS; j++) {
+      int b_col = (threadIdx.x + j) % B_COLS;
+      C[blockIdx.x * C_COLS + b_col] += a_element * BTileSHMEM[b_row][b_col];
+    }
+  }
+            
 }
 
 
@@ -126,7 +120,7 @@ int main() {
   matrixMultiplyCPU(h_A, h_B, h_C_cpu);
 
   bool correct = verifyResults(h_C, h_C_cpu, C_ROWS * C_COLS);
-  //printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+  printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 
   free(h_A);
   free(h_B);

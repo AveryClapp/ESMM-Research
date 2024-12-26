@@ -120,7 +120,7 @@ int main() {
   matrixMultiplyCPU(h_A, h_B, h_C_cpu);
 
   bool correct = verifyResults(h_C, h_C_cpu, C_ROWS * C_COLS);
-  printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+  //printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 
   free(h_A);
   free(h_B);

@@ -16,11 +16,11 @@ __global__ void basic32(float* A, float* B, float* C) {
 	}
 }
 
-__global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
-	// Each thread handles one row of B
+// Original Method for a 8x8 block of B, impossible to eleminate atomicAdd
+// here (pigeonhole principle)
+__global__ void basic8(float* A, float* B, float* C) {
 	int b_row = threadIdx.x;
 	if (b_row < B_ROWS) {
-		// TODO memory coalescing
 		float b_elements[8] = {
 			B[b_row * B_COLS + 0],
 			B[b_row * B_COLS + 1],
@@ -31,7 +31,6 @@ __global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
 			B[b_row * B_COLS + 6],
 			B[b_row * B_COLS + 7]
 		};
-		// How do we not use atomic add here?
 		float a_element = A[blockIdx.x * A_COLS + b_row];
 		atomicAdd(&C[blockIdx.x * C_COLS + 0], a_element * b_elements[0]);
 		atomicAdd(&C[blockIdx.x * C_COLS + 1], a_element * b_elements[1]);
@@ -42,4 +41,10 @@ __global__ void matrixMultiplyKernel(float* A, float* B, float* C) {
 		atomicAdd(&C[blockIdx.x * C_COLS + 6], a_element * b_elements[6]);
 		atomicAdd(&C[blockIdx.x * C_COLS + 7], a_element * b_elements[7]);
 	}
+}
+
+// New method to calculate blocks of C (each thread goes row(A) x col(B) for one
+// element). The problem is that b is (8x32),
+__global__ void sequential8(float* A, float* B, float* C) {
+
 }

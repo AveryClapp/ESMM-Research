@@ -6,6 +6,14 @@
 #define CEIL_DIV(M,N) ((M) + (N) - 1) / (N)
 #define PATTERN_LENGTH 8
 
+#define A_ROWS 1024
+#define A_COLS 32
+#define B_ROWS 32
+#define B_COLS 32
+#define C_ROWS 1024
+#define C_COLS 32
+#define TILE_SIZE 32
+
 void cudaCheck(cudaError_t error, const char *file, int line);
 
 void randomize_matrix_with_pattern(float* mat, int M, int N, std::vector<int> pattern);

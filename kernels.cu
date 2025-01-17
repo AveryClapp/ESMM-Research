@@ -45,12 +45,14 @@ __global__ void basic8(float* A, float* B, float* C) {
 
 // New method to calculate blocks of C (each thread goes row(A) x col(B) for one
 // element). The problem is that b is (8x32),
+// TODO try one shared memory variable with offsetting to see if that results in
+// increased performance
 __global__ void sequential(float* A, float* B, float* C, int blocksize) {
 	extern __shared__ float shared_A[];
 	extern __shared__ float shared_B[];	    
 
 	const int row = blockIdx.x * blockDim.x + (threadIdx.x / blockDim.x);
-	const int col = blockIdx.y * blockDim.x + (threadIdx.x % blockDim.x);
+	const int col = blockIdx.y * blockDim.x + (threadIdx.x % B_COLS);
 	
 	// Load elements of A into SMEM, the motivation here is that since A_COLS !=
 	// B_COLS, we need to find a quick way to load A elements into SMEM. This
@@ -69,6 +71,7 @@ __global__ void sequential(float* A, float* B, float* C, int blocksize) {
 	// Stop GPU until all threads are done adding to SMEM
 	__syncthreads();
 
+	//TODO modify this for a discrepancy in column sizes b/w A and B
 	float tmp = 0.0;
 	for (int i=0; i < inners; ++i) {
 		tmp += A[row * inners + i] * B[i * columns + col]; 

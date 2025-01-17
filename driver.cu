@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include "utils.cuh"
+#include "kernels.cu"
 
 #define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
 inline void cudaAssert(cudaError_t code, const char *file, int line) {
@@ -56,6 +57,7 @@ int main() {
 
 	cudaFree(0);
 	cudaMemset(d_C, 0, C_ROWS * C_COLS * sizeof(float));
+	// 1024 blocks of 32
 	dim3 gridDim(1024);
 	dim3 blockDim(32);
 	cudaEvent_t start, stop;

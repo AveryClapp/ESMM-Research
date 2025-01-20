@@ -48,9 +48,11 @@ __global__ void basic8(float* A, float* B, float* C) {
 __global__ void sequential(float* A, float* B, float* C) {
 	extern __shared__ float SMEM[];
 	float *sA = SMEM;
-	float *sB = SMEM + A_COLS * A_ROWS;
+	float *sB = SMEM + (A_COLS * A_ROWS);
 
-	const int row = blockIdx.x * blockDim.x + (threadIdx.x / blockDim.x);
+	// First 32 (A_COLS) threads are assigned to row 0, second group to row 1
+	const int row = blockIdx.x * blockDim.x + (threadIdx.x / A_COLS);
+	// Assign col sequentially and wrap around B_COLS
 	const int col = blockIdx.y * blockDim.x + (threadIdx.x % B_COLS);
 	
 	// Load elements of A into SMEM, the motivation here is that since A_COLS !=
@@ -70,9 +72,10 @@ __global__ void sequential(float* A, float* B, float* C) {
 	// Stop GPU until all threads are done adding to SMEM
 	__syncthreads();
 
-	float tmp = 0.0;
-	for (int i=0; i < A_COLS; ++i) {
-		tmp += A[row * A_COLS + i] * B[i * B_COLS + col]; 
-	}
-	C[row * C_COLS + col] = tmp;
+	//float tmp = 0.0;
+	//for (int i=0; i < A_COLS; ++i) {
+	//	tmp += A[row * A_COLS + i] * B[i * B_COLS + col]; 
+	//}
+	//C[row * C_COLS + col] = tmp;
+	return;
 }

@@ -9,9 +9,9 @@
 #define A_ROWS 1024
 #define A_COLS 32
 #define B_ROWS 32
-#define B_COLS 32
+#define B_COLS 8
 #define C_ROWS 1024
-#define C_COLS 32
+#define C_COLS 8
 #define TILE_SIZE 32
 
 void cudaCheck(cudaError_t error, const char *file, int line);

@@ -1,6 +1,5 @@
 # MMMResearch
 ## TODO
-- [ ] Get in touch with Dr. Burns
 
 ## Current Findings:
 30 run AVG for atomic add: .1536

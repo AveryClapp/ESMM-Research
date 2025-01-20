@@ -64,7 +64,7 @@ int main() {
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start);
-	matrixMultiplyKernelSHMEM<<<gridDim, blockDim>>>(d_A, d_B, d_C);
+	sequential<<<gridDim, blockDim>>>(d_A, d_B, d_C);
 	cudaEventRecord(stop);
 	cudaEventSynchronize(stop);
 	cudaCheckError(cudaMemcpy(h_C, d_C, C_ROWS * C_COLS * sizeof(float), cudaMemcpyDeviceToHost));

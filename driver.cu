@@ -14,14 +14,14 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 }
 
 
-void matrixMultiplyCPU(float* A, float* B, float* C) {               
-	for (int row = 0; row < A_ROWS; row++) { 
-		for (int col = 0; col < B_COLS; col++) {
+void matrixMultiplyCPU(float* A, float* B, float* C, int rows, int cols) {               
+	for (int row = 0; row < rows; row++) { 
+		for (int col = 0; col < cols; col++) {
 			float sum = 0.0f;
-			for (int i = 0; i < A_COLS; i++) {
-				sum += A[row * A_COLS + i] * B[i * B_COLS + col];
+			for (int i = 0; i < rows; i++) {
+				sum += A[row * cols + i] * B[i * cols + col];
 			}
-		C[row * C_COLS + col] = sum;
+		C[row * cols + col] = sum;
 		}
 	}
 }
@@ -39,43 +39,47 @@ bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance
 }
 
 int main() {
-	float *h_A = (float*)malloc(A_ROWS * A_COLS * sizeof(float));
-	float *h_B = (float*)malloc(B_ROWS * B_COLS * sizeof(float));
-	float *h_C = (float*)malloc(C_ROWS * C_COLS * sizeof(float));
-	float *h_C_cpu = (float*)malloc(C_ROWS * C_COLS * sizeof(float));
+	constexpr int rows = 32;
+	constexpr int cols = 32;
+	constexpr int inners = 32;
 
-	randomize_matrix(h_A, A_ROWS, A_COLS);
-	randomize_matrix(h_B, B_ROWS, B_COLS);
+	float *h_A = (float*)malloc(rows * cols * sizeof(float));
+	float *h_B = (float*)malloc(rows * cols * sizeof(float));
+	float *h_C = (float*)malloc(rows * cols * sizeof(float));
+	float *h_C_cpu = (float*)malloc(rows * cols * sizeof(float));
+
+	randomize_matrix(h_A, rows, cols);
+	randomize_matrix(h_B, rows, cols);
 
 	float *d_A, *d_B, *d_C;
-	cudaCheckError(cudaMalloc(&d_A, A_ROWS * A_COLS * sizeof(float)));
-	cudaCheckError(cudaMalloc(&d_B, B_ROWS * B_COLS * sizeof(float)));
-	cudaCheckError(cudaMalloc(&d_C, C_ROWS * C_COLS * sizeof(float)));
+	cudaCheckError(cudaMalloc(&d_A, rows * cols * sizeof(float)));
+	cudaCheckError(cudaMalloc(&d_B, rows * cols * sizeof(float)));
+	cudaCheckError(cudaMalloc(&d_C, rows * cols * sizeof(float)));
 
-	cudaCheckError(cudaMemcpy(d_A, h_A, A_ROWS * A_COLS * sizeof(float), cudaMemcpyHostToDevice));
-	cudaCheckError(cudaMemcpy(d_B, h_B, B_ROWS * B_COLS * sizeof(float), cudaMemcpyHostToDevice));
+	cudaCheckError(cudaMemcpy(d_A, h_A, rows * cols * sizeof(float), cudaMemcpyHostToDevice));
+	cudaCheckError(cudaMemcpy(d_B, h_B, rows * cols * sizeof(float), cudaMemcpyHostToDevice));
 
 	cudaFree(0);
-	cudaMemset(d_C, 0, C_ROWS * C_COLS * sizeof(float));
-	// 1024 blocks of 32
-	dim3 gridDim(1024);
-	dim3 blockDim(32);
+	cudaMemset(d_C, 0, rows * cols * sizeof(float));
+	//Tiling of a (32x32) * (32x32) matrix multiplication
+	dim3 gridDim(4,2);
+	dim3 blockDim(8,16);
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start);
-	sequential<<<gridDim, blockDim>>>(d_A, d_B, d_C);
+	sequential_rectangles<<<gridDim, blockDim.x * blockDim.y>>>(d_A, d_B, d_C, blockDim.x, blockDim.y, inners);
 	cudaEventRecord(stop);
 	cudaEventSynchronize(stop);
-	cudaCheckError(cudaMemcpy(h_C, d_C, C_ROWS * C_COLS * sizeof(float), cudaMemcpyDeviceToHost));
+	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 
 	float time = 0.0f;
 	cudaEventElapsedTime(&time, start, stop);
 
 	std::cout << "GPU Timing: " << time << " ms" << std::endl;
-	matrixMultiplyCPU(h_A, h_B, h_C_cpu);
+	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
 
-	bool correct = verifyResults(h_C, h_C_cpu, C_ROWS * C_COLS);
+	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
 		//printf("Matrix
 		//multiplication
 		//%s\n",

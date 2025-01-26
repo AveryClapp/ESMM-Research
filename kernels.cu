@@ -43,39 +43,68 @@ __global__ void basic8(float* A, float* B, float* C) {
 	}
 }
 
-// New method to calculate blocks of C (each thread goes row(A) x col(B) for one
-// element). The problem is that b is (8x32),
-__global__ void sequential(float* A, float* B, float* C) {
+// Matrix multiplication on tiled rectangles
+__global__ void sequential_rectangles(float* A, float* B, float* C, int xDim, int yDim, int innerDim) {
+	const int row = blockIdx.x * xDim + (threadIdx.x / yDim);
+	const int col = blockIdx.y * yDim + (threadIdx.x % yDim);	
+	// Perform dot product matrix multiplication on this
+	float tmp = 0.0;
+	for (int i = 0; i < innerDim; i++) {
+		tmp += A[row * innerDim + i] * B[i * xDim + col]; 
+	}
+	C[row * yDim + col] = tmp;
+}
+
+//TODO WIP.
+__global__ void sequential_smem(float* A, float* B, float* C) {
 	extern __shared__ float SMEM[];
 	float *sA = SMEM;
 	float *sB = SMEM + (A_COLS * A_ROWS);
 
-	// First 32 (A_COLS) threads are assigned to row 0, second group to row 1
 	const int row = blockIdx.x * blockDim.x + (threadIdx.x / A_COLS);
-	// Assign col sequentially and wrap around B_COLS
-	const int col = blockIdx.y * blockDim.x + (threadIdx.x % B_COLS);
+	const int col = blockIdx.y * blockDim.y + (threadIdx.x % B_COLS);
 	
-	// Load elements of A into SMEM, the motivation here is that since A_COLS !=
-	// B_COLS, we need to find a quick way to load A elements into SMEM. This
-	// can be done by having each thread add 4 elements into SMEM [col, col+3]
-	sA[threadIdx.x * 4 + 0] = A[row * A_COLS + col + 0];
-	sA[threadIdx.x * 4 + 1] = A[row * A_COLS + col + 1];
-	sA[threadIdx.x * 4 + 2] = A[row * A_COLS + col + 2];
-	sA[threadIdx.x * 4 + 3] = A[row * A_COLS + col + 3];
-
-	// Stop GPU until all threads are done adding to SMEM
+	sA[threadIdx.x] = A[row * A_COLS + col];
 	__syncthreads();
 
-	// Load elements of B into SMEM.
 	sB[threadIdx.x] = B[(threadIdx.x / B_COLS) * B_COLS + col];
-
-	// Stop GPU until all threads are done adding to SMEM
 	__syncthreads();
 
-	//float tmp = 0.0;
-	//for (int i=0; i < A_COLS; ++i) {
-	//	tmp += A[row * A_COLS + i] * B[i * B_COLS + col]; 
-	//}
-	//C[row * C_COLS + col] = tmp;
+	float tmp = 0.0;
+	for (int i=0; i < A_COLS; ++i) {
+		tmp += sA[row * A_COLS + i] * sB[i * B_COLS + col]; 
+	}
+
+	C[row * C_COLS + col] = tmp;
+
 	return;
 }
+
+/*
+// rectangular 2,4
+dim3 gridDim24(2,4);
+dim3 blockDim24(16,8);
+
+// rectangular 4,2
+dim3 gridDim42(4,2);
+dim3 blockDim42(8,16);
+rblksz = blockDim.x
+cblksz = blockDim.y
+ */
+__global__ void esmm_sequential_ns (int rows, int columns, int inners, 
+									int rblksz, int cblksz, 
+														const float *A, const float *B, float *C)
+{
+// change iteration order to output sequentially
+	const int row = blockIdx.x * rblksz + (threadIdx.x / cblksz);
+	const int col = blockIdx.y * cblksz + (threadIdx.x % cblksz);
+
+	float tmp = 0.0;
+	for (int i=0; i < inners; ++i)
+	{
+		tmp += A[row * inners + i] * B[i * columns + col]; 
+	}
+	C[row * columns + col] = tmp;
+}
+
+

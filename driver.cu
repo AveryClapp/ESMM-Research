@@ -39,9 +39,10 @@ bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance
 }
 
 int main() {
-	constexpr int rows = 32;
-	constexpr int cols = 32;
-	constexpr int inners = 32;
+	// Setup 
+	constexpr int rows = 128;
+	constexpr int cols = 128;
+	constexpr int inners = 128;
 
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
 	float *h_B = (float*)malloc(rows * cols * sizeof(float));
@@ -61,14 +62,21 @@ int main() {
 
 	cudaFree(0);
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
-	//Tiling of a (32x32) * (32x32) matrix multiplication
-	dim3 gridDim(4,2);
-	dim3 blockDim(8,16);
+
+
+	constexpr int blockHeight = 32; // Height of tiled block	
+	constexpr int blockWidth = 32; // Width of tiled block
+	constexpr int blockInner = 8; // width of tiled block
+	constexpr int resultsPerThread = 8;
+
+	dim3 gridDim(CEIL_DIV(cols,blockWidth),CEIL_DIV(rows,blockHeight));
+	dim3 blockDim((blockHeight * blockWidth)/blockInner);
+
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start);
-	sequential_rectangles<<<gridDim, blockDim.x * blockDim.y>>>(d_A, d_B, d_C, blockDim.x, blockDim.y, inners);
+	matMulBlocktilingTwo<blockHeight, blockWidth, blockInner, resultsPerThread><<<gridDim, blockDim>>>(d_A, d_B, d_C, cols, inners);
 	cudaEventRecord(stop);
 	cudaEventSynchronize(stop);
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
@@ -80,12 +88,7 @@ int main() {
 	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
 
 	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-		//printf("Matrix
-		//multiplication
-		//%s\n",
-		//correct ?
-		//"PASSED" :
-		//"FAILED");
+	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 
 	free(h_A);
 	free(h_B);

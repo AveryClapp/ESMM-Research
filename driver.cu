@@ -76,7 +76,7 @@ int main() {
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start);
-	matMulBlocktilingTwo<blockHeight, blockWidth, blockInner, resultsPerThread><<<gridDim, blockDim>>>(d_A, d_B, d_C, cols, inners);
+	matMulBlocktiling<blockHeight, blockWidth, blockInner, resultsPerThread><<<gridDim, blockDim>>>(d_A, d_B, d_C, cols, inners);
 	cudaEventRecord(stop);
 	cudaEventSynchronize(stop);
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));

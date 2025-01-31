@@ -81,3 +81,26 @@ bool verify_matrix(float *mat1, float *mat2, int M, int N) {
   return true;
 }
 
+void matrixMultiplyCPU(float* A, float* B, float* C, int rows, int cols) {
+	for (int row = 0; row < rows; row++) {
+		for (int col = 0; col < cols; col++) {
+			float sum = 0.0f;
+			for (int i = 0; i < rows; i++) {
+				sum += A[row * cols + i] * B[i * cols + col];
+			}
+			C[row * cols + col] = sum;
+		}
+	}
+}
+
+// Verify results
+bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance = 1e-3) {
+	for (int i = 0; i < size; i++) {
+		if (fabs(gpuResult[i] - cpuResult[i]) > tolerance) {
+			printf("Mismatch at position %d: GPU = %f, CPU = %f\n",
+				i, gpuResult[i], cpuResult[i]);
+			return false;
+		}
+	}
+	return true;
+}

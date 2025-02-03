@@ -2,12 +2,6 @@
 #include <cassert>
 #include <cuda_runtime.h>
 #include "../utils.cuh"
-/*
-	Next Steps 
-	- Kernel Profiling
-	- 2d blocktiling
-	- autotuning params of block size (we know B will be 32x8)
-*/
 
 template <const int blockHeight, const int blockWidth, const int blockInner, const int TM>
 __global__ void matMulBlocktiling(float* A, float* B, float* C, int N, int innerDim) {
@@ -37,18 +31,18 @@ __global__ void matMulBlocktiling(float* A, float* B, float* C, int N, int inner
 	for (int blockIndex = 0; blockIndex < innerDim; blockIndex += blockInner) {
 		As[innerRowA * blockInner + innerColA] = A[innerRowA * innerDim + innerColA];
 		Bs[innerRowB * blockWidth + innerColB] = B[innerRowB * N + innerColB];
+		__syncthreads();
 
 		float* currA = baseA + blockIndex;
 		float* currB = baseB + blockIndex * N;
 		for (int dotIdx = 0; dotIdx < blockInner; ++dotIdx) {
-			float tmpB = currB[dotIdx * N + localCol]; 
+			float tmpB = Bs[dotIdx * blockWidth + localCol];
 			for (int resIdx = 0; resIdx < TM; ++resIdx) {
-				threadResults[resIdx] += currA[(localRow * TM + resIdx) * innerDim + dotIdx] * tmpB;
+				threadResults[resIdx] += As[(localRow * TM + resIdx) * blockInner + dotIdx] * tmpB;
 			}
 		}
 		__syncthreads();
 	}
-	//TODO potential for unrolling
 	for (int resIdx = 0; resIdx < TM; ++resIdx) {
 		baseC[(localRow * TM + resIdx) * N + localCol] = threadResults[resIdx];
 	}

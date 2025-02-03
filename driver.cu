@@ -38,9 +38,9 @@ int main() {
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
 	//Run 1D blocktiling kernel
-	constexpr int blockHeight = 32; // Height of tiled block	
-	constexpr int blockWidth = 32; // Width of tiled block
-	constexpr int blockInner = 8; // width of tiled block
+	constexpr int blockHeight = 32;
+	constexpr int blockWidth = 32;
+	constexpr int blockInner = 8;
 	constexpr int resultsPerThread = 8;
 	dim3 gridDim(CEIL_DIV(cols,blockWidth),CEIL_DIV(rows,blockHeight));
 	dim3 blockDim((blockHeight * blockWidth)/blockInner);

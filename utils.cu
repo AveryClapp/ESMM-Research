@@ -94,7 +94,7 @@ void matrixMultiplyCPU(float* A, float* B, float* C, int rows, int cols) {
 }
 
 // Verify results
-bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance = 1e-3) {
+bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance) {
 	for (int i = 0; i < size; i++) {
 		if (fabs(gpuResult[i] - cpuResult[i]) > tolerance) {
 			printf("Mismatch at position %d: GPU = %f, CPU = %f\n",

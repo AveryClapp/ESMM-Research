@@ -38,14 +38,18 @@ int main() {
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
 	//Run 1D blocktiling kernel
-	constexpr int blockHeight = 32;
-	constexpr int blockWidth = 32;
+	constexpr int blockHeight = 64;
+	constexpr int blockWidth = 64;
 	constexpr int blockInner = 8;
 	constexpr int resultsPerThread = 8;
-	dim3 gridDim(CEIL_DIV(cols,blockWidth),CEIL_DIV(rows,blockHeight));
-	dim3 blockDim((blockHeight * blockWidth)/blockInner);
-	matMulBlocktiling<blockHeight, blockWidth, blockInner, resultsPerThread><<<gridDim, blockDim>>>(d_A, d_B, d_C, cols, inners);
+	dim3 gridDim(CEIL_DIV(cols,blockWidth), CEIL_DIV(rows,blockHeight));
+	dim3 blockDim((blockWidth * blockHeight) / resultsPerThread);
+
+	sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(128,128,128,d_A,d_B,d_C);
+
+	//matMulBlockTiling<blockHeight, blockWidth, blockInner, resultsPerThread><<<gridDim, blockDim>>>(d_A, d_B, d_C, cols, inners);
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
+	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
 	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
 	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 

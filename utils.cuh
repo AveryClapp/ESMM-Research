@@ -3,7 +3,8 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include <string>
-#define CEIL_DIV(M,N) ((M) + (N) - 1) / (N)
+#include <iostream>
+#define CEIL_DIV(M,N) (((M) + (N)-1) / (N))
 #define PATTERN_LENGTH 8
 
 void cudaCheck(cudaError_t error, const char *file, int line);

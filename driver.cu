@@ -17,7 +17,7 @@ int main() {
 	// Setup 
 	constexpr int rows = 128;
 	constexpr int cols = 128;
-	constexpr int inners = 128;
+	//constexpr int inners = 128;
 
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
 	float *h_B = (float*)malloc(rows * cols * sizeof(float));
@@ -44,14 +44,23 @@ int main() {
 	constexpr int resultsPerThread = 8;
 	dim3 gridDim(CEIL_DIV(cols,blockWidth), CEIL_DIV(rows,blockHeight));
 	dim3 blockDim((blockWidth * blockHeight) / resultsPerThread);
+	cudaEvent_t start, stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
 
+	cudaEventRecord(start);
 	sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(128,128,128,d_A,d_B,d_C);
+	cudaEventRecord(stop);
+	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
+	cudaEventSynchronize(stop);
+	float milliseconds = 0;
+	cudaEventElapsedTime(&milliseconds, start, stop);
+
 
 	//matMulBlockTiling<blockHeight, blockWidth, blockInner, resultsPerThread><<<gridDim, blockDim>>>(d_A, d_B, d_C, cols, inners);
-	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
 	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+	printf("Matrix multiplication %s (%f ms)\n", correct ? "PASSED" : "FAILED", milliseconds);
 
 	free(h_A);
 	free(h_B);
@@ -60,7 +69,8 @@ int main() {
 	cudaFree(d_A);
 	cudaFree(d_B);
 	cudaFree(d_C);
-
+	cudaEventDestroy(start);
+	cudaEventDestroy(stop);
 	return 0;
 }
 

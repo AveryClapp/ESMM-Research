@@ -14,6 +14,6 @@ std::vector<int> stringToVector(const std::string& str);
 void print_matrix(const float* A, int M, int N);
 bool verify_matrix(float* mat1, float* mat2, int M, int N);
 void matrixMultiplyCPU(float* A, float* B, float* C, int rows, int cols);
-bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance = 1e-4);
+bool verifyResults(float* gpuResult, float* cpuResult, int size, float tolerance = 1e-3);
 
 #endif

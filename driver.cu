@@ -15,9 +15,9 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 
 int main() {
 	// Setup 
-	constexpr int rows = 128;
-	constexpr int cols = 128;
-	//constexpr int inners = 128;
+	constexpr int rows = 512;
+	constexpr int cols = 512;
+	constexpr int inners = 512;
 
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
 	float *h_B = (float*)malloc(rows * cols * sizeof(float));
@@ -49,7 +49,7 @@ int main() {
 	cudaEventCreate(&stop);
 
 	cudaEventRecord(start);
-	sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(128,128,128,d_A,d_B,d_C);
+	sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
 	cudaEventRecord(stop);
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 	cudaEventSynchronize(stop);

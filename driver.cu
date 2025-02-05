@@ -15,9 +15,9 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 
 int main() {
 	// Setup 
-	constexpr int rows = 512;
-	constexpr int cols = 512;
-	constexpr int inners = 512;
+	constexpr int rows = 1024;
+	constexpr int cols = 1024;
+	constexpr int inners = 1024;
 
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
 	float *h_B = (float*)malloc(rows * cols * sizeof(float));

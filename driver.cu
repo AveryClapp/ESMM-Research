@@ -4,6 +4,8 @@
 #include <cuda_runtime.h>
 #include "utils.cuh"
 #include "./kernels/1D_Blocktiling.cu"
+#include "./kernels/prod.cu"
+#include "./kernels/prod2.cu"
 #include <chrono>
 
 #define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
@@ -22,9 +24,9 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 
 int main() {
 	// Setup 
-	constexpr int rows = 1024;
-	constexpr int cols = 1024;
-	constexpr int inners = 1024;
+	constexpr int rows = 8;
+	constexpr int cols = 8;
+	constexpr int inners = 8;
 
 	// Allocate host matrices
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
@@ -59,14 +61,15 @@ int main() {
 	dim3 gridDim(CEIL_DIV(cols,blockWidth), CEIL_DIV(rows,blockHeight));
 	dim3 blockDim((blockWidth * blockHeight) / resultsPerThread);
 	START;		
-	sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
-	END("1D Blocktiling")
+	//sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
+	esmm_shmem_multi2<<<dim3(1,1), dim3(8), 8*8*2>>>(rows, cols, inners, 8, d_A, d_B, d_C);
+	END("PROD")
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 	// Reset C matrix
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-	//bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-	//printf("Matrix multiplication %s (%f ms)\n", correct ? "PASSED" : "FAILED", milliseconds);
+	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
+	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
+	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 
 	free(h_A);
 	free(h_B);

@@ -24,10 +24,10 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 
 int main() {
 	// Setup 
-	constexpr int rows = 8;
-	constexpr int cols = 8;
-	constexpr int inners = 8;
-
+	constexpr int rows = 1024;
+	constexpr int cols = 1024;
+	constexpr int inners = 1024;
+	constexpr int blocksize = 8;
 	// Allocate host matrices
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
 	float *h_B = (float*)malloc(rows * cols * sizeof(float));
@@ -50,22 +50,13 @@ int main() {
 
 	// Reset output matrix to 0
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
-	
-	// divide matrices into blocks and set threads per block
 
-	//Run 1D blocktiling kernel
-	constexpr int blockHeight = 64;
-	constexpr int blockWidth = 64;
-	constexpr int blockInner = 8;
-	constexpr int resultsPerThread = 8;
-	dim3 gridDim(CEIL_DIV(cols,blockWidth), CEIL_DIV(rows,blockHeight));
-	dim3 blockDim((blockWidth * blockHeight) / resultsPerThread);
 	START;		
-	//sgemm1DBlocktiling<blockHeight,blockWidth,blockInner,resultsPerThread><<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
-	esmm_shmem_multi2<<<dim3(1,1), dim3(8), 8*8*2>>>(rows, cols, inners, 8, d_A, d_B, d_C);
+	esmm_shmem_multi<<<dim3(CEIL_DIV(rows, blocksize), CEIL_DIV(cols, blocksize)), dim3(blocksize), blocksize * blocksize * 2>>>(rows, cols, inners, blocksize, d_A, d_B, d_C);
 	END("PROD")
+	cudaCheckError(cudaGetLastError());
+	cudaCheckError(cudaDeviceSynchronize());
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
-	// Reset C matrix
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
 	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
 	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);

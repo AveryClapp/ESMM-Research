@@ -2,7 +2,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 
-__global__ void esmm_shmem_multi (int rows, int columns, int inners, 
+__global__ void esmm_shmem_multi(int rows, int columns, int inners, 
 				int blocksize,
 				const float *A, const float *B, float *C)
 {

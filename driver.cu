@@ -27,7 +27,7 @@ int main() {
 	constexpr int rows = 1024;
 	constexpr int cols = 1024;
 	constexpr int inners = 1024;
-	constexpr int blocksize = 8;
+	constexpr int blocksize = 32;
 	// Allocate host matrices
 	float *h_A = (float*)malloc(rows * cols * sizeof(float));
 	float *h_B = (float*)malloc(rows * cols * sizeof(float));
@@ -52,7 +52,7 @@ int main() {
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
 	START;		
-	esmm_shmem_multi<<<dim3(CEIL_DIV(rows, blocksize), CEIL_DIV(cols, blocksize)), dim3(blocksize), blocksize * blocksize * 2>>>(rows, cols, inners, blocksize, d_A, d_B, d_C);
+	esmm_shmem_multi<<<dim3(CEIL_DIV(rows, blocksize), CEIL_DIV(cols, blocksize)), dim3(blocksize), blocksize * blocksize * 2 * sizeof(float)>>>(rows, cols, inners, blocksize, d_A, d_B, d_C);
 	END("PROD")
 	cudaCheckError(cudaGetLastError());
 	cudaCheckError(cudaDeviceSynchronize());

@@ -8,14 +8,13 @@ __global__ void esmm_shmem_multi (int rows, int columns, int inners,
 {
 	const int row = blockIdx.x * blocksize;
 	const int col = blockIdx.y * blocksize + (threadIdx.x % blocksize);
-
 	int coloff = col % blocksize;
 
 	extern __shared__ float sArea [];
 	float* sA = sArea;  
 	float* sB = sArea + blocksize * blocksize; 
-
-	float tmpres[8] = {0.0}; 
+	// Create an array to hold (blocksize) number of elements
+	float tmpres[32] = {0.0}; 
 
 	for (int inner=0; inner < inners; inner += blocksize)
 	{
@@ -24,7 +23,7 @@ __global__ void esmm_shmem_multi (int rows, int columns, int inners,
 			sA[dotidx * blocksize + coloff] = A[(row + dotidx) * inners + inner + coloff];
 			sB[dotidx * blocksize + coloff] = B[(inner + dotidx) * columns + col];
 		}
-		//__syncthreads();
+		__syncthreads();
 
 		for (int i=0; i < blocksize; ++i)
 		{
@@ -34,7 +33,7 @@ __global__ void esmm_shmem_multi (int rows, int columns, int inners,
 				tmpres[dotidx] +=  sA[dotidx * blocksize + i] * Btmp;
 			}
 		}
-			__syncthreads();
+		__syncthreads();
 	}
 
 	for (int dotidx=0; dotidx<blocksize; dotidx++)

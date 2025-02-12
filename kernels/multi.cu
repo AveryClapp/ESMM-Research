@@ -35,7 +35,9 @@ __global__ void esmm_shmem_multi (int rows, int columns, int inners,
 		}
 		__syncthreads();
 	}
-
+	
+	//Can unroll this since we have to know the tmpres array size at launch
+	//anyways
 	for (int dotidx=0; dotidx<blocksize; dotidx++)
 	{
 		C[(row + dotidx) * columns + col] = tmpres[dotidx];

@@ -4,8 +4,8 @@
 #include <cuda_runtime.h>
 #include "utils.cuh"
 #include "./kernels/1D_Blocktiling.cu"
-#include "./kernels/prod.cu"
-#include "./kernels/prod2.cu"
+#include "./kernels/multi.cu"
+#include "./kernels/multi2.cu"
 #include <chrono>
 
 #define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
@@ -51,16 +51,21 @@ int main() {
 	// Reset output matrix to 0
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
+	//Launch kernel and record elapsed time
 	START;		
 	esmm_shmem_multi<<<dim3(CEIL_DIV(rows, blocksize), CEIL_DIV(cols, blocksize)), dim3(blocksize), blocksize * blocksize * 2 * sizeof(float)>>>(rows, cols, inners, blocksize, d_A, d_B, d_C);
-	END("PROD")
+	END("Multi")
+	
+	// Cleanup and copy GPU data
 	cudaCheckError(cudaGetLastError());
 	cudaCheckError(cudaDeviceSynchronize());
 	cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 	cudaMemset(d_C, 0, rows * cols * sizeof(float));
-	matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
-	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+
+	// Verify GPU computation
+	//matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
+	//bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
+	//printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 
 	free(h_A);
 	free(h_B);

@@ -3,7 +3,7 @@
 #include <iostream>
 
 /* Device functions to handle 8 element long computations */
-__device__ void dense(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
+__device__ void full(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
 	tmpres[dotidx] +=  sA[dotidx * blocksize + i] * sB[i * blocksize + coloff];
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+1)] * sB[(i+1) * blocksize + coloff];
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+2)] * sB[(i+2) * blocksize + coloff];
@@ -12,6 +12,17 @@ __device__ void dense(int dotidx, int i, int blocksize, int coloff, float* tmpre
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+5)] * sB[(i+5) * blocksize + coloff];
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+6)] * sB[(i+6) * blocksize + coloff];
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+7)] * sB[(i+7) * blocksize + coloff];
+}
+
+__device__ void half(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
+	tmpres[dotidx] +=  sA[dotidx * blocksize + i] * sB[i * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+1)] * sB[(i+1) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+2)] * sB[(i+2) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+3)] * sB[(i+3) * blocksize + coloff];
+}
+
+__device__ void one(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
+	tmpres[dotidx] +=  sA[dotidx * blocksize + i] * sB[i * blocksize + coloff];
 }
 
 __global__ void esmm_shmem_multi3 (int rows, int columns, int inners, 
@@ -42,7 +53,7 @@ __global__ void esmm_shmem_multi3 (int rows, int columns, int inners,
 		{
 			for (int i=0; i < blocksize; i += blocksize/4)
 			{
-				dense(dotidx,i,blocksize,coloff,tmpres,sA,sB);
+				full(dotidx,i,blocksize,coloff,tmpres,sA,sB);
 			}
 		}
 		__syncthreads();

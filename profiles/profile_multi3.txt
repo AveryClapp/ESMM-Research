@@ -1,0 +1,72 @@
+==PROF== Connected to process 8821 (/home/ec2-user/cuda_work/tests/a.out)
+==PROF== Profiling "esmm_shmem_multi3" - 0: 0%....50%....100% - 9 passes
+"Multi" took 596.458 milliseconds
+Mismatch at position 0: GPU = 55.022079, CPU = -257.470520
+Matrix multiplication FAILED
+==PROF== Disconnected from process 8821
+[8821] a.out@127.0.0.1
+  esmm_shmem_multi3(int, int, int, int, const float *, const float *, float *) (32, 32, 1)x(32, 1, 1), Context 1, Stream 7, Device 0, CC 8.6
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ------------- ------------
+    Metric Name               Metric Unit Metric Value
+    ----------------------- ------------- ------------
+    DRAM Frequency          cycle/nsecond         6.21
+    SM Frequency            cycle/nsecond         1.31
+    Elapsed Cycles                  cycle    2,273,471
+    Memory Throughput                   %        80.78
+    DRAM Throughput                     %        10.49
+    Duration                      msecond         1.73
+    L1/TEX Cache Throughput             %        89.68
+    L2 Cache Throughput                 %        15.23
+    SM Active Cycles                cycle 2,047,666.39
+    Compute (SM) Throughput             %        80.78
+    ----------------------- ------------- ------------
+
+    INF   The kernel is utilizing greater than 80.0% of the available compute or memory performance of the device. To   
+          further improve performance, work will likely need to be shifted from the most utilized to another unit.      
+          Start by analyzing workloads in the Compute Workload Analysis section.                                        
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                    32
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                  1,024
+    Registers Per Thread             register/thread              40
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block            8.19
+    Static Shared Memory Per Block        byte/block               0
+    Threads                                   thread          32,768
+    Waves Per SM                                                1.16
+    -------------------------------- --------------- ---------------
+
+    WRN   A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the    
+          target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical       
+          occupancy of the kernel. This kernel launch results in 1 full waves and a partial wave of 144 thread blocks.  
+          Under the assumption of a uniform execution duration of all thread blocks, the partial wave may account for   
+          up to 50.0% of the total kernel runtime with a lower occupancy of 22.9%. Try launching a grid with no         
+          partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for  
+          a grid. See the Hardware Model                                                                                
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more      
+          details on launch configurations.                                                                             
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           16
+    Block Limit Registers                 block           48
+    Block Limit Shared Mem                block           11
+    Block Limit Warps                     block           48
+    Theoretical Active Warps per SM        warp           11
+    Theoretical Occupancy                     %        22.92
+    Achieved Occupancy                        %        17.67
+    Achieved Active Warps Per SM           warp         8.48
+    ------------------------------- ----------- ------------
+
+    WRN   This kernel's theoretical occupancy (22.9%) is limited by the required amount of shared memory. See the CUDA  
+          Best Practices Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for      
+          more details on optimizing occupancy.                                                                         
+

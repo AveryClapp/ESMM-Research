@@ -5,14 +5,13 @@
 /* Device functions to handle 8 element long computations */
 __device__ void dense(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
 	tmpres[dotidx] +=  sA[dotidx * blocksize + i] * sB[i * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+1] * sB[i+1 * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+2] * sB[i+2 * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+3] * sB[i+3 * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+4] * sB[i+4 * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+5] * sB[i+5 * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+6] * sB[i+6 * blocksize + coloff];
-	tmpres[dotidx] +=  sA[dotidx * blocksize + i+7] * sB[i+7 * blocksize + coloff];
-	return;
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+1)] * sB[(i+1) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+2)] * sB[(i+2) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+3)] * sB[(i+3) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+4)] * sB[(i+4) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+5)] * sB[(i+5) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+6)] * sB[(i+6) * blocksize + coloff];
+	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+7)] * sB[(i+7) * blocksize + coloff];
 }
 
 __global__ void esmm_shmem_multi3 (int rows, int columns, int inners, 
@@ -32,7 +31,7 @@ __global__ void esmm_shmem_multi3 (int rows, int columns, int inners,
 
 	for (int inner=0; inner < inners; inner += blocksize)
 	{
-		for (int dotidx=0; dotidx<blocksize; dotidx++)
+		for (int dotidx=0; dotidx < blocksize; dotidx++)
 		{
 			sA[dotidx * blocksize + coloff] = A[(row + dotidx) * inners + inner + coloff];
 			sB[dotidx * blocksize + coloff] = B[(inner + dotidx) * columns + col];

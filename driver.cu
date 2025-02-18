@@ -79,9 +79,9 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 
 int main() {
 		// Setup 
-		constexpr int rows = 1024;
-		constexpr int cols = 1024;
-		constexpr int inners = 1024;
+		constexpr int rows = 4096;
+		constexpr int cols = 4096;
+		constexpr int inners = 4096;
 		constexpr int blocksize = 32;
 		// Allocate host matrices
 		float *h_A = (float*)malloc(rows * cols * sizeof(float));
@@ -103,7 +103,7 @@ int main() {
 		cudaCheckError(cudaMemcpy(d_A, h_A, rows * cols * sizeof(float), cudaMemcpyHostToDevice));
 		cudaCheckError(cudaMemcpy(d_B, h_B, rows * cols * sizeof(float), cudaMemcpyHostToDevice));
 	
-		collect_data(30, 4, rows, cols, inners, blocksize, d_A, d_B, d_C);
+		collect_data(10, 4, rows, cols, inners, blocksize, d_A, d_B, d_C);
 
 		// Verify GPU computation
 		//bool correct = verifyResults(h_C, h_C_cpu, rows * cols);

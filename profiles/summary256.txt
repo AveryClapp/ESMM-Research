@@ -1,0 +1,181 @@
+==PROF== Connected to process 12481 (/home/ec2-user/cuda_work/tests/a.out)
+==PROF== Profiling "esmm_shmem_multi" - 0: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 1: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 2: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 3: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 4: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 5: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 6: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 7: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 8: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi" - 9: 0%....50%....100% - 9 passes
+Average Speed of Kernel Multi (10 runs): 332.6413 ms
+==PROF== Profiling "esmm_shmem_multi2" - 10: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 11: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 12: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 13: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 14: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 15: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 16: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 17: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 18: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi2" - 19: 0%....50%....100% - 9 passes
+Average Speed of Kernel Multi2 (10 runs): 304.8910 ms
+==PROF== Profiling "esmm_shmem_multi3" - 20: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 21: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 22: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 23: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 24: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 25: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 26: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 27: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 28: 0%....50%....100% - 9 passes
+==PROF== Profiling "esmm_shmem_multi3" - 29: 0%....50%....100% - 9 passes
+Average Speed of Kernel Multi3 (10 runs): 305.1286 ms
+==PROF== Disconnected from process 12481
+[12481] a.out@127.0.0.1
+  Device 0, CC 8.6
+    esmm_shmem_multi(int, int, int, int, const float *, const float *, float *) (8, 8, 1)x(32, 1, 1), Invocations 10
+      Section: GPU Speed Of Light Throughput
+      ----------------------- ------------- ---------- ---------- ----------
+      Metric Name               Metric Unit    Minimum    Maximum    Average
+      ----------------------- ------------- ---------- ---------- ----------
+      DRAM Frequency          cycle/nsecond       6.22       6.23       6.22
+      SM Frequency            cycle/nsecond       1.31       1.32       1.32
+      Elapsed Cycles                  cycle 349,381.00 349,941.00 349,613.30
+      Memory Throughput                   %       4.35       4.35       4.35
+      DRAM Throughput                     %       0.41       0.41       0.41
+      Duration                      usecond     265.57     266.18     265.82
+      L1/TEX Cache Throughput             %       5.47       5.48       5.48
+      L2 Cache Throughput                 %       0.91       0.92       0.92
+      SM Active Cycles                cycle 277,539.56 277,944.76 277,751.31
+      Compute (SM) Throughput             %      11.31      11.33      11.32
+      ----------------------- ------------- ---------- ---------- ----------
+
+      Section: Launch Statistics
+      -------------------------------- --------------- -------- -------- --------
+      Metric Name                          Metric Unit  Minimum  Maximum  Average
+      -------------------------------- --------------- -------- -------- --------
+      Block Size                                          32.00    32.00    32.00
+      Grid Size                                           64.00    64.00    64.00
+      Registers Per Thread             register/thread    56.00    56.00    56.00
+      Shared Memory Configuration Size           Kbyte   102.40   102.40   102.40
+      Driver Shared Memory Per Block       Kbyte/block     1.02     1.02     1.02
+      Dynamic Shared Memory Per Block      Kbyte/block     8.19     8.19     8.19
+      Static Shared Memory Per Block        byte/block     0.00     0.00     0.00
+      Threads                                   thread 2,048.00 2,048.00 2,048.00
+      Waves Per SM                                         0.07     0.07     0.07
+      -------------------------------- --------------- -------- -------- --------
+
+      Section: Occupancy
+      ------------------------------- ----------- ------- ------- -------
+      Metric Name                     Metric Unit Minimum Maximum Average
+      ------------------------------- ----------- ------- ------- -------
+      Block Limit SM                        block   16.00   16.00   16.00
+      Block Limit Registers                 block   36.00   36.00   36.00
+      Block Limit Shared Mem                block   11.00   11.00   11.00
+      Block Limit Warps                     block   48.00   48.00   48.00
+      Theoretical Active Warps per SM        warp   11.00   11.00   11.00
+      Theoretical Occupancy                     %   22.92   22.92   22.92
+      Achieved Occupancy                        %    2.08    2.09    2.08
+      Achieved Active Warps Per SM           warp    1.00    1.00    1.00
+      ------------------------------- ----------- ------- ------- -------
+
+    esmm_shmem_multi2(int, int, int, int, const float *, const float *, float *) (8, 8, 1)x(32, 1, 1), Invocations 10
+      Section: GPU Speed Of Light Throughput
+      ----------------------- ------------- ---------- ---------- ----------
+      Metric Name               Metric Unit    Minimum    Maximum    Average
+      ----------------------- ------------- ---------- ---------- ----------
+      DRAM Frequency          cycle/nsecond       6.21       6.26       6.23
+      SM Frequency            cycle/nsecond       1.31       1.32       1.32
+      Elapsed Cycles                  cycle 182,326.00 183,989.00 182,857.20
+      Memory Throughput                   %      15.62      15.76      15.72
+      DRAM Throughput                     %       1.07       1.09       1.08
+      Duration                      usecond     138.75     139.14     138.91
+      L1/TEX Cache Throughput             %      20.00      20.06      20.02
+      L2 Cache Throughput                 %       2.68       2.72       2.70
+      SM Active Cycles                cycle 143,299.79 143,738.35 143,568.47
+      Compute (SM) Throughput             %      15.62      15.76      15.72
+      ----------------------- ------------- ---------- ---------- ----------
+
+      Section: Launch Statistics
+      -------------------------------- --------------- -------- -------- --------
+      Metric Name                          Metric Unit  Minimum  Maximum  Average
+      -------------------------------- --------------- -------- -------- --------
+      Block Size                                          32.00    32.00    32.00
+      Grid Size                                           64.00    64.00    64.00
+      Registers Per Thread             register/thread    40.00    40.00    40.00
+      Shared Memory Configuration Size           Kbyte   102.40   102.40   102.40
+      Driver Shared Memory Per Block       Kbyte/block     1.02     1.02     1.02
+      Dynamic Shared Memory Per Block      Kbyte/block     8.19     8.19     8.19
+      Static Shared Memory Per Block        byte/block     0.00     0.00     0.00
+      Threads                                   thread 2,048.00 2,048.00 2,048.00
+      Waves Per SM                                         0.07     0.07     0.07
+      -------------------------------- --------------- -------- -------- --------
+
+      Section: Occupancy
+      ------------------------------- ----------- ------- ------- -------
+      Metric Name                     Metric Unit Minimum Maximum Average
+      ------------------------------- ----------- ------- ------- -------
+      Block Limit SM                        block   16.00   16.00   16.00
+      Block Limit Registers                 block   48.00   48.00   48.00
+      Block Limit Shared Mem                block   11.00   11.00   11.00
+      Block Limit Warps                     block   48.00   48.00   48.00
+      Theoretical Active Warps per SM        warp   11.00   11.00   11.00
+      Theoretical Occupancy                     %   22.92   22.92   22.92
+      Achieved Occupancy                        %    2.08    2.09    2.08
+      Achieved Active Warps Per SM           warp    1.00    1.00    1.00
+      ------------------------------- ----------- ------- ------- -------
+
+    esmm_shmem_multi3(int, int, int, int, const float *, const float *, float *) (8, 8, 1)x(32, 1, 1), Invocations 10
+      Section: GPU Speed Of Light Throughput
+      ----------------------- ------------- ---------- ---------- ----------
+      Metric Name               Metric Unit    Minimum    Maximum    Average
+      ----------------------- ------------- ---------- ---------- ----------
+      DRAM Frequency          cycle/nsecond       6.21       6.24       6.22
+      SM Frequency            cycle/nsecond       1.31       1.32       1.31
+      Elapsed Cycles                  cycle 146,932.00 147,563.00 147,155.80
+      Memory Throughput                   %      19.49      19.57      19.54
+      DRAM Throughput                     %       0.97       0.98       0.98
+      Duration                      usecond     111.65     112.38     111.91
+      L1/TEX Cache Throughput             %      24.94      25.01      24.98
+      L2 Cache Throughput                 %       3.35       3.37       3.36
+      SM Active Cycles                cycle 114,958.46 115,293.21 115,089.17
+      Compute (SM) Throughput             %      19.49      19.57      19.54
+      ----------------------- ------------- ---------- ---------- ----------
+
+      Section: Launch Statistics
+      -------------------------------- --------------- -------- -------- --------
+      Metric Name                          Metric Unit  Minimum  Maximum  Average
+      -------------------------------- --------------- -------- -------- --------
+      Block Size                                          32.00    32.00    32.00
+      Grid Size                                           64.00    64.00    64.00
+      Registers Per Thread             register/thread    40.00    40.00    40.00
+      Shared Memory Configuration Size           Kbyte   102.40   102.40   102.40
+      Driver Shared Memory Per Block       Kbyte/block     1.02     1.02     1.02
+      Dynamic Shared Memory Per Block      Kbyte/block     8.19     8.19     8.19
+      Static Shared Memory Per Block        byte/block     0.00     0.00     0.00
+      Threads                                   thread 2,048.00 2,048.00 2,048.00
+      Waves Per SM                                         0.07     0.07     0.07
+      -------------------------------- --------------- -------- -------- --------
+
+      Section: Occupancy
+      ------------------------------- ----------- ------- ------- -------
+      Metric Name                     Metric Unit Minimum Maximum Average
+      ------------------------------- ----------- ------- ------- -------
+      Block Limit SM                        block   16.00   16.00   16.00
+      Block Limit Registers                 block   48.00   48.00   48.00
+      Block Limit Shared Mem                block   11.00   11.00   11.00
+      Block Limit Warps                     block   48.00   48.00   48.00
+      Theoretical Active Warps per SM        warp   11.00   11.00   11.00
+      Theoretical Occupancy                     %   22.92   22.92   22.92
+      Achieved Occupancy                        %    2.08    2.09    2.08
+      Achieved Active Warps Per SM           warp    1.00    1.00    1.00
+      ------------------------------- ----------- ------- ------- -------
+
+  Note: The shown averages are calculated as the arithmetic mean of the metric values after the evaluation of the    
+  metrics for each individual kernel launch.                                                                         
+  If aggregating across varying launch configurations (like shared memory, cache config settings), the arithmetic    
+  mean can be misleading and looking at the individual results is recommended instead.                               
+  This output mode is backwards compatible to the per-kernel summary output of nvprof                                
+

@@ -14,7 +14,7 @@ __device__ void full(int dotidx, int i, int blocksize, int coloff, float* tmpres
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+7)] * sB[(i+7) * blocksize + coloff];
 }
 
-__device__ void half(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
+__device__ void half_sparse(int dotidx, int i, int blocksize, int coloff, float* tmpres, float* sA, float* sB) {
 	tmpres[dotidx] +=  sA[dotidx * blocksize + i] * sB[i * blocksize + coloff];
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+1)] * sB[(i+1) * blocksize + coloff];
 	tmpres[dotidx] +=  sA[dotidx * blocksize + (i+2)] * sB[(i+2) * blocksize + coloff];

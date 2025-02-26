@@ -11,7 +11,7 @@
 
 template <const int BM, const int BN, const int BK, const int TM, const int TN>
 __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
-	two_blocktiling(int M, int N, int K, const float *A,
+	sgemm2DBlocktiling(int M, int N, int K, const float *A,
 						const float *B, float *C) {
 	// Determines where the block will start
 	const uint cRow = blockIdx.y;
@@ -55,7 +55,14 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 
 	// Every advance the block through the matrix
 	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
+		float4 tmp = reinterpret_cast<const float4 *>(&A[innerRowA * K + innerColA * 4])[0];
 		
+		// Load elements from row major order in A to column major in As
+		As[(innerColA * 4 + 0) * BM + innerRowA] = tmp.x;
+   		As[(innerColA * 4 + 1) * BM + innerRowA] = tmp.y;
+	    As[(innerColA * 4 + 2) * BM + innerRowA] = tmp.z;
+		As[(innerColA * 4 + 3) * BM + innerRowA] = tmp.w;
+
 		/* Load elements into SMEM in column order for less bank conflicts */
 		for (uint loadOffset = 0; loadOffset < BM; loadOffset += strideA) {
 			As[(innerRowA + loadOffset) * BK + innerColA] =
@@ -95,8 +102,13 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 	// Accumulate results from thread results registerfile into C
 	for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
 		for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
-			C[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN] =
-				threadResults[resIdxM * TN + resIdxN];
+			float4 tmp;
+			tmp.x = threadResults[resIdxM * TN + resIdxN];
+			tmp.y = threadResults[resIdxM * TN + resIdxN + 1];
+			tmp.z = threadResults[resIdxM * TN + resIdxN + 2];
+			tmp.w = threadResults[resIdxM * TN + resIdxN + 3];
+			reinterpret_cast<float4 *>(
+				&C[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN])[0] = tmp;
 		}
 	}
 }

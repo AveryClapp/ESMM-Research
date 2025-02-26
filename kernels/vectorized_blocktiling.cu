@@ -41,11 +41,9 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 	const uint innerRowA = threadIdx.x / BK;
 	const uint innerColA = threadIdx.x % BK;
 	// Define how large our "steps" are in SMEM
-	const uint strideA = numThreadsBlocktile / BK;
 
 	const uint innerRowB = threadIdx.x / BN;
 	const uint innerColB = threadIdx.x % BN;
-	const uint strideB = numThreadsBlocktile / BN;
 
 	float threadResults[TM * TN] = {0.0}; // All thread results
 
@@ -63,15 +61,12 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 	    As[(innerColA * 4 + 2) * BM + innerRowA] = tmp.z;
 		As[(innerColA * 4 + 3) * BM + innerRowA] = tmp.w;
 
-		/* Load elements into SMEM in column order for less bank conflicts */
-		for (uint loadOffset = 0; loadOffset < BM; loadOffset += strideA) {
-			As[(innerRowA + loadOffset) * BK + innerColA] =
-				A[(innerRowA + loadOffset) * K + innerColA];
-		}
-		for (uint loadOffset = 0; loadOffset < BK; loadOffset += strideB) {
-			Bs[(innerRowB + loadOffset) * BN + innerColB] =
-				B[(innerRowB + loadOffset) * N + innerColB];
-		}
+		// Load the float4 value from global memory
+		 tmp = reinterpret_cast<const float4 *>(&B[innerRowB * N + innerColB * 4])[0];
+
+		// Store the float4 value to shared memory
+		*reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4]) = tmp;
+		//reinterpret_cast<const float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] = reinterpret_cast< const float4 *>(&B[innerRowB * N + innerColB * 4])[0];
 		__syncthreads();
 
 		// Advance the matrix pointers to the start of the next block

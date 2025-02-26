@@ -24,6 +24,8 @@ __global__ void one_blocktiling(int M, int N, int K, const float *A, const float
 	C += cRow * BM * N + cCol * BN;
 
 	//Block-level indexing for SMEM 
+	assert(BM * BK == blockDim.x);
+	assert(BN * BK == blockDim.x);
 	const uint innerColA = threadIdx.x % BK;
 	const uint innerRowA = threadIdx.x / BK;
 	const uint innerColB = threadIdx.x % BN; 
@@ -48,9 +50,6 @@ __global__ void one_blocktiling(int M, int N, int K, const float *A, const float
 		__syncthreads();
 	}
 
-	// write out the results
-	// TODO can probably unroll this when TM is set, although this might be
-	// autotuned
 	for (uint resIdx = 0; resIdx < TM; ++resIdx) {
 		C[(threadRow * TM + resIdx) * N + threadCol] = threadResults[resIdx];
 	}

@@ -11,7 +11,7 @@
 
 template <const int BM, const int BN, const int BK, const int TM, const int TN>
 __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
-	sgemm2DBlocktiling(int M, int N, int K, const float *A,
+	vectorized_blocktiling(int M, int N, int K, const float *A,
 						const float *B, float *C) {
 	// Determines where the block will start
 	const uint cRow = blockIdx.y;
@@ -107,8 +107,7 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 			tmp.y = threadResults[resIdxM * TN + resIdxN + 1];
 			tmp.z = threadResults[resIdxM * TN + resIdxN + 2];
 			tmp.w = threadResults[resIdxM * TN + resIdxN + 3];
-			reinterpret_cast<float4 *>(
-				&C[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN])[0] = tmp;
+			reinterpret_cast<float4 *>(&C[(threadRow * TM + resIdxM) * N + threadCol * TN + resIdxN])[0] = tmp;
 		}
 	}
 }

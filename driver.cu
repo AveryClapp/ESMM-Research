@@ -8,6 +8,9 @@
 #include "./kernels/multi.cu"
 #include "./kernels/multi2.cu"
 #include "./kernels/multi3.cu"
+#include "./kernels/1D_Blocktiling.cu"
+#include "./kernels/2D_Blocktiling.cu"
+#include "./kernels/vectorized_blocktiling.cu"
 #include <chrono>
 
 #define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
@@ -69,12 +72,72 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 			RESULTS("Multi3")
 			break;
 		}
+		case 4: {
+						// 1D Blocktiling
+			constexpr int BM = 128;
+			constexpr int BN = 128;
+			constexpr int BK = 8;
+			constexpr int TM = 8;
+			dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+			dim3 blockDim(BN * BM / TM);
+			for (int i = 0; i < runs; i++) {
+				START
+				one_blocktiling<BM, BN, BK, TM><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+				END
+				cudaDeviceSynchronize();
+				cudaMemset(d_C, 0, rows * cols * sizeof(float));
+			}
+			RESULTS("1D Blocktiling")
+			break;
+		}
+		case 5: {
+			// 2D Blocktiling
+			constexpr int BM = 64;
+			constexpr int BN = 64;
+			constexpr int BK = 8;
+			constexpr int TM = 8;
+			constexpr int TN = 8;
+			dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+			dim3 blockDim(BM * BN / (TM * TN));
+			for (int i = 0; i < runs; i++) {
+				START
+				two_blocktiling<BM, BN, BK, TM, TN><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+				END
+				cudaDeviceSynchronize();
+				cudaMemset(d_C, 0, rows * cols * sizeof(float));
+			}
+			RESULTS("2D Blocktiling")
+			break;
+		}
+		case 6: {
+			// Vectorized Blocktiling
+			constexpr int BM = 64;
+			constexpr int BN = 64;
+			constexpr int BK = 8;
+			constexpr int TM = 8;
+			constexpr int TN = 8;
+			dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+			dim3 blockDim(BM * BN / (TM * TN));
+			for (int i = 0; i < runs; i++) {
+				START
+				vectorized_blocktiling<BM, BN, BK, TM, TN><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+				END
+				cudaDeviceSynchronize();
+				cudaMemset(d_C, 0, rows * cols * sizeof(float));
+			}
+			RESULTS("Vectorized Blocktiling")
+			break;
+		}
 		default:
 			// Run all kernels
 			collect_data(runs, 1, rows, cols, inners, blocksize, d_A, d_B, d_C);
 			collect_data(runs, 2, rows, cols, inners, blocksize, d_A, d_B, d_C);
 			collect_data(runs, 3, rows, cols, inners, blocksize, d_A, d_B, d_C);
-		}
+			/* 1d blocktiling isnt working right now */ 
+			//collect_data(runs, 4, rows, cols, inners, blocksize, d_A, d_B, d_C);
+			//collect_data(runs, 5, rows, cols, inners, blocksize, d_A, d_B, d_C);
+			collect_data(runs, 6, rows, cols, inners, blocksize, d_A, d_B, d_C);
+	}
 }
 
 int main() {
@@ -102,8 +165,8 @@ int main() {
 		// Copy random data to device matrices
 		cudaCheckError(cudaMemcpy(d_A, h_A, rows * cols * sizeof(float), cudaMemcpyHostToDevice));
 		cudaCheckError(cudaMemcpy(d_B, h_B, rows * cols * sizeof(float), cudaMemcpyHostToDevice));
-	
-		collect_data(10, 4, rows, cols, inners, blocksize, d_A, d_B, d_C);
+
+		collect_data(1, 0, rows, cols, inners, blocksize, d_A, d_B, d_C);
 
 		// Verify GPU computation
 		//bool correct = verifyResults(h_C, h_C_cpu, rows * cols);

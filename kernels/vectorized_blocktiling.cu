@@ -50,7 +50,8 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 
 	// Every advance the block through the matrix
 	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		float4 tmp = reinterpret_cast<const float4 *>(&A[innerRowA * K + innerColA * 4])[0];
+		float4 tmp = 
+		  reinterpret_cast<const float4 *>(&A[innerRowA * K + innerColA * 4])[0];
 		
 		// Load elements from row major order in A to column major in As
 		As[(innerColA * 4 + 0) * BM + innerRowA] = tmp.x;
@@ -59,8 +60,8 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 		As[(innerColA * 4 + 3) * BM + innerRowA] = tmp.w;
 
 		// Load the float4 value from global memory
-		    reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] =
-					        reinterpret_cast<float4 *>(&B[innerRowB * N + innerColB * 4])[0];
+		reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] =
+		  reinterpret_cast<float4 *>(&B[innerRowB * N + innerColB * 4])[0];
 		__syncthreads();
 
 		// Advance the matrix pointers to the start of the next block
@@ -70,7 +71,7 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			// Store values to be used in inner loop
 			for (uint i = 0; i < TM; ++i) {
-				regM[i] = As[(threadRow * TM + i) * BK + dotIdx];
+				regM[i] = As[dotIdx * BM + threadRow * TM + i];
 			}
 			// Store values to be used in inner loop
 			for (uint i = 0; i < TN; ++i) {
@@ -89,8 +90,8 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 	}
 	
 	// Accumulate results from thread results registerfile into C
-	for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
-		for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
+	for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
+		for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
 			float4 tmp;
 			tmp.x = threadResults[resIdxM * TN + resIdxN];
 			tmp.y = threadResults[resIdxM * TN + resIdxN + 1];

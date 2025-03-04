@@ -26,7 +26,7 @@ const int WARPSIZE = 32;
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	sgemmWarptiling(int M, int N, int K, float *A, float *B,, float *C) {
+	warptiling(int M, int N, int K, float *A, float *B, float *C) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
@@ -114,15 +114,13 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
 			for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
 				for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
-					float4 tmp = reinterpret_cast<float4 *>(
-						&C_interim[(threadRowInWarp * TM + resIdxM) * N +
-						threadColInWarp * TN + resIdxN])[0];
+					float4 tmp;
 					const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
 						wSubColIdx * TN + resIdxN;
-					tmp.x = alpha * threadResults[i + 0] + beta * tmp.x;
-					tmp.y = alpha * threadResults[i + 1] + beta * tmp.y;
-					tmp.z = alpha * threadResults[i + 2] + beta * tmp.z;
-					tmp.w = alpha * threadResults[i + 3] + beta * tmp.w;
+					tmp.x = threadResults[i + 0];
+					tmp.y = threadResults[i + 1];
+					tmp.z = threadResults[i + 2];
+					tmp.w = threadResults[i + 3];
 					reinterpret_cast<float4 *>(
 								&C_interim[(threadRowInWarp * TM + resIdxM) * N +
 								threadColInWarp * TN + resIdxN])[0] = tmp;

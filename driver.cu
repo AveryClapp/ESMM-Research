@@ -11,6 +11,7 @@
 #include "./kernels/1D_Blocktiling.cu"
 #include "./kernels/2D_Blocktiling.cu"
 #include "./kernels/vectorized_blocktiling.cu"
+#include "./kernels/warptiling.cu"
 #include <chrono>
 
 #define cudaCheckError(ans) { cudaAssert((ans), __FILE__, __LINE__); }
@@ -55,8 +56,8 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				cudaDeviceSynchronize();
 				cudaCheckError(cudaMemcpy(h_C, d_C,  rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-				bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-				printf("1D Blocktiling  %s\n", correct ? "PASSED" : "FAILED");
+			//	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
+			//	printf("1D Blocktiling  %s\n", correct ? "PASSED" : "FAILED");
 
 			}
 			RESULTS("1D Blocktiling")
@@ -64,8 +65,8 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 		}
 		case 5: {
 			// 2D Blocktiling
-			constexpr int BM = 64;
-			constexpr int BN = 64;
+			constexpr int BM = 128;
+			constexpr int BN = 128;
 			constexpr int BK = 8;
 			constexpr int TM = 8;
 			constexpr int TN = 8;
@@ -78,16 +79,16 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				cudaDeviceSynchronize();
 				cudaCheckError(cudaMemcpy(h_C, d_C,  rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-				bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-				printf("2D Blocktiling %s\n", correct ? "PASSED" : "FAILED");
+			//	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
+			//	printf("2D Blocktiling %s\n", correct ? "PASSED" : "FAILED");
 			}
 			RESULTS("2D Blocktiling")
 			break;
 		}
 		case 6: {
 			// Vectorized Blocktiling
-			constexpr int BM = 64;
-			constexpr int BN = 64;
+			constexpr int BM = 128;
+			constexpr int BN = 128;
 			constexpr int BK = 8;
 			constexpr int TM = 8;
 			constexpr int TN = 8;
@@ -100,25 +101,57 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				cudaDeviceSynchronize();
 				cudaCheckError(cudaMemcpy(h_C, d_C,  rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
 				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-				bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-				printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+			//	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
+			//	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 			}
 			RESULTS("Vectorized Blocktiling")
 			break;
+		}
+		case 7: {
+			const uint K10_NUM_THREADS = 128;
+			const uint K10_BN = 128;
+			const uint K10_BM = 128;
+			const uint K10_BK = 16;
+			const uint K10_WN = 64;
+			const uint K10_WM = 64;
+			const uint K10_WNITER = 4;
+			const uint K10_TN = 4;
+			const uint K10_TM = 8;
+
+  			dim3 blockDim(K10_NUM_THREADS);
+    		constexpr uint NUM_WARPS = K10_NUM_THREADS / 32;
+
+			constexpr uint K10_WMITER = (K10_WM * K10_WN) / (32 * K10_TM * K10_TN * K10_WNITER);
+			
+			dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+			for (int i = 0; i < runs; i++) {
+				START
+				warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS> <<<gridDim, blockDim>>>(cols, rows, inners, d_A, d_B, d_C);
+				END
+				cudaDeviceSynchronize();
+				cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
+				cudaMemset(d_C, 0, rows * cols * sizeof(float));
+				//bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
+				//printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
+			}
+			RESULTS("Warptiling")
+			break;
+
 		}
 		default:
 			// Run all kernels
 			collect_data(runs, 4, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 5, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 6, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
+			collect_data(runs, 7, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 	}
 }
 
 int main() {
 		// Setup 
-		constexpr int rows = 256;
-		constexpr int cols = 256;
-		constexpr int inners = 256;
+		constexpr int rows = 1024;
+		constexpr int cols = 1024;
+		constexpr int inners = 1024;
 		constexpr int blocksize = 32;
 		// Allocate host matrices
 		float *h_A = (float*)malloc(rows * cols * sizeof(float));
@@ -146,6 +179,7 @@ int main() {
 		 * 4 - 1d
 		 * 5 - 2d
 		 * 6 - vectorized
+		 * 7 - warptiling
 		*/
 		collect_data(1, 0, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 

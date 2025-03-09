@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <iomanip>
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
 #include "utils.cuh"
 #include "./kernels/1D_Blocktiling.cu"
 #include "./kernels/multi.cu"
@@ -138,12 +139,31 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 			break;
 
 		}
+		case 8: {
+			cublasHandle_t handle;
+    		cublasCreate(&handle);
+	   		float alpha = 1.0f;
+		    float beta = 0.0f;
+
+			for (int i = 0; i < runs; i++) {
+				START
+				cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, cols, rows, inners, &alpha,d_B, cols, d_A, inners, &beta, d_C, cols);
+				END
+				cudaDeviceSynchronize();
+				cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
+				cudaMemset(d_C, 0, rows * cols * sizeof(float));
+			}
+			RESULTS("cuBLAS")	
+			cublasDestroy(handle);	
+			break;
+		}
 		default:
 			// Run all kernels
 			collect_data(runs, 4, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 5, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 6, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 7, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
+			collect_data(runs, 8, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 	}
 }
 

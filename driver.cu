@@ -5,10 +5,10 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include "utils.cuh"
+#include "./kernels/basic.cu"
+#include "./kernels/gmem_coalesce.cu"
+#include "./kernels/smem_blocking.cu"
 #include "./kernels/1D_Blocktiling.cu"
-#include "./kernels/multi.cu"
-#include "./kernels/multi2.cu"
-#include "./kernels/multi3.cu"
 #include "./kernels/1D_Blocktiling.cu"
 #include "./kernels/2D_Blocktiling.cu"
 #include "./kernels/vectorized_blocktiling.cu"
@@ -42,6 +42,42 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 	// Integer corresponds to the version of multi
 	SETUP
 	switch (kernel) {
+		case 1: {
+			dim3 gridDim(CEIL_DIV(cols, 32), CEIL_DIV(rows, 32));
+			dim3 blockDim(32, 32);
+			for (int i = 0; i < runs; i++) {
+				START
+				basic<<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
+				END
+				cudaDeviceSynchronize();
+			}
+			RESULTS("Naive");
+			break;
+		}
+		case 2: {
+			dim3 gridDim(CEIL_DIV(cols, 32), CEIL_DIV(rows, 32));
+			dim3 blockDim(32, 32);
+			for (int i = 0; i < runs; i++) {
+				START
+				gmem_coalesce<32><<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
+				END
+				cudaDeviceSynchronize();
+			}
+			RESULTS("GMEM Coalescing");		
+			break;
+		}
+		case 3: {
+			dim3 gridDim(CEIL_DIV(cols, 32), CEIL_DIV(rows, 32));
+			dim3 blockDim(32, 32);
+			for (int i = 0; i < runs; i++) {
+				START
+				smem_blocking<32><<<gridDim, blockDim>>>(rows,cols,inners,d_A,d_B,d_C);
+				END
+				cudaDeviceSynchronize();
+			}
+			RESULTS("SMEM Blocking");		
+			break;
+		}
 		case 4: {
 			// 1D Blocktiling
 			constexpr int BM = 64;
@@ -55,11 +91,6 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				one_blocktiling<BM, BN, BK, TM><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
 				END
 				cudaDeviceSynchronize();
-				cudaCheckError(cudaMemcpy(h_C, d_C,  rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
-				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-			//	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-			//	printf("1D Blocktiling  %s\n", correct ? "PASSED" : "FAILED");
-
 			}
 			RESULTS("1D Blocktiling")
 			break;
@@ -78,10 +109,6 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				two_blocktiling<BM, BN, BK, TM, TN><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
 				END
 				cudaDeviceSynchronize();
-				cudaCheckError(cudaMemcpy(h_C, d_C,  rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
-				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-			//	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-			//	printf("2D Blocktiling %s\n", correct ? "PASSED" : "FAILED");
 			}
 			RESULTS("2D Blocktiling")
 			break;
@@ -100,10 +127,6 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				vectorized_blocktiling<BM, BN, BK, TM, TN><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
 				END
 				cudaDeviceSynchronize();
-				cudaCheckError(cudaMemcpy(h_C, d_C,  rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
-				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-			//	bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-			//	printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 			}
 			RESULTS("Vectorized Blocktiling")
 			break;
@@ -130,10 +153,6 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 				warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS> <<<gridDim, blockDim>>>(cols, rows, inners, d_A, d_B, d_C);
 				END
 				cudaDeviceSynchronize();
-				cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
-				cudaMemset(d_C, 0, rows * cols * sizeof(float));
-				//bool correct = verifyResults(h_C, h_C_cpu, rows * cols);
-				//printf("Matrix multiplication %s\n", correct ? "PASSED" : "FAILED");
 			}
 			RESULTS("Warptiling")
 			break;
@@ -145,9 +164,11 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 	   		float alpha = 1.0f;
 		    float beta = 0.0f;
 
+			cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, cols, rows, inners, &alpha, d_B, cols, d_A, inners, &beta, d_C, cols);
+				
 			for (int i = 0; i < runs; i++) {
 				START
-				cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, cols, rows, inners, &alpha,d_B, cols, d_A, inners, &beta, d_C, cols);
+				cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, cols, rows, inners, &alpha, d_B, cols, d_A, inners, &beta, d_C, cols);
 				END
 				cudaDeviceSynchronize();
 				cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
@@ -159,6 +180,9 @@ void collect_data(int runs, int kernel, int rows, int cols, int inners, int bloc
 		}
 		default:
 			// Run all kernels
+			collect_data(runs, 1, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
+			collect_data(runs, 2, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
+			collect_data(runs, 3, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 4, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 5, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 			collect_data(runs, 6, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
@@ -196,10 +220,14 @@ int main() {
 		matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols);
 		// Run kernels
 		/* 0 - all
+		 * 1 - Naive
+		 * 2 - GMEM Coalescing
+		 * 3 - SMEM Blocking
 		 * 4 - 1d
 		 * 5 - 2d
 		 * 6 - vectorized
 		 * 7 - warptiling
+		 * 8 - cuBLAS
 		*/
 		collect_data(1, 0, rows, cols, inners, blocksize, d_A, d_B, d_C, h_C, h_C_cpu);
 

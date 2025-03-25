@@ -1,5 +1,7 @@
 #pragma once
 
+/* Basic CUDA Kernel with no optimizations */
+
 #include <cuda_runtime.h>
 
 

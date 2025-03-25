@@ -14,7 +14,7 @@ TN_VALUES=(4 8 16 32)
 NUM_THREADS_VALUES=(128 256)
 
 RUNNER="./driver.cu"
-OUTPUT="../benchmark_results/kernel_10_autotune_results.txt"
+OUTPUT="./kernel_10_autotune_results.txt"
 
 # Clear the output file
 echo "" > $OUTPUT
@@ -42,44 +42,34 @@ CONFIG_NUM=$(( CONFIG_NUM + 1 ))
 # skip configurations that don't fullfil preconditions
 NUM_WARPS=$(( NUM_THREADS / 32 ))
 if ! (( BN % WN == 0 && BM % WM == 0 )); then
-  echo "Error: BN % WN must be 0 and BM % WM must be 0."
   continue
 fi
 if ! (( (BN / WN) * (BM / WM) == NUM_WARPS )); then
-  echo "Error: (BN / WN) * (BM / WM) must be equal to NUM_WARPS."
   continue
 fi
 if ! (( (WM * WN) % (WARPSIZE * TM * TN * WN_ITER) == 0 )); then
-  echo "Error: (WM * WN) % (WARPSIZE * TM * TN * WN_ITER) must be 0."
   continue
 fi
 WM_ITER=$(( (WM * WN) / (WARPSIZE * TM * TN * WN_ITER) ))
 if ! (( WM % WM_ITER == 0 && WN % WN_ITER == 0 )); then
-  echo "Error: WM % WM_ITER must be 0 and WN % WN_ITER must be 0."
   continue
 fi
 if ! (( (NUM_THREADS * 4) % BK == 0 )); then
-  echo "Error: (NUM_THREADS * 4) % BK must be 0."
   continue
 fi
 if ! (( (NUM_THREADS * 4) % BN == 0 )); then
-  echo "Error: (NUM_THREADS * 4) % BN must be 0."
   continue
 fi
 if ! (( BN % (16 * TN) == 0 )); then
-  echo "Error: BN must be a multiple of 16 * TN."
   continue
 fi
 if ! (( BM % (16 * TM) == 0 )); then
-  echo "Error: BM must be a multiple of 16 * TM."
   continue
 fi
 if ! (( (BM * BK) % (4 * NUM_THREADS) == 0 )); then
-  echo "Error: (BM * BK) % (4 * NUM_THREADS) must be 0."
   continue
 fi
 if ! (( (BN * BK) % (4 * NUM_THREADS) == 0 )); then
-  echo "Error: (BN * BK) % (4 * NUM_THREADS) must be 0."
   continue
 fi
 
@@ -95,12 +85,12 @@ sed -i "s/const uint K10_TM = .*/const uint K10_TM = $TM;/" $RUNNER
 sed -i "s/const uint K10_TN = .*/const uint K10_TN = $TN;/" $RUNNER
 
 # Rebuild the program
-nvcc driver.cu -o sgemm
+nvcc driver.cu -lcublas -o sgemm
 
 echo "($CONFIG_NUM/$TOTAL_CONFIGS): BK=$BK BM=$BM BN=$BN WM=$WM WN=$WN WN_ITER=$WN_ITER TM=$TM TN=$TN NUM_THREADS=$NUM_THREADS" |& tee -a $OUTPUT
 # Run the benchmark and get the result
 # Kill the program after 4 seconds if it doesn't finish
-timeout -v 8 ./sgemm 10 | tee -a $OUTPUT
+timeout -k 2 8 ./sgemm 10 | tee -a $OUTPUT
 done
 done
 done

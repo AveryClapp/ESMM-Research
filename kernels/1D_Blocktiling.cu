@@ -1,5 +1,7 @@
 #pragma once
 
+/* Kernel #4, One Dimensional Blockitling (multiple results per thread) */
+
 #include <cuda.h>
 #include <cassert>
 #include <cuda_runtime.h>

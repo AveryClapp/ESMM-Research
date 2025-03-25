@@ -1,5 +1,7 @@
 #pragma once
 
+/* Kernel #2 in Siboehm's blog, Global Memory Coalescing */
+
 #include <cuda_runtime.h>
 
 

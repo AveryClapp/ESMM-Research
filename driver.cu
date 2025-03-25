@@ -26,31 +26,29 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
   }
 }
 
-#define SETUP                                                                  \
-  auto start = std::chrono::high_resolution_clock::now();                      \
-  auto end = std::chrono::high_resolution_clock::now();                        \
-  double total_time = 0.0f;
+#define SETUP \
+	auto start = std::chrono::high_resolution_clock::now(); \
+	auto end = std::chrono::high_resolution_clock::now(); \
+	double total_time = 0.0f;
 #define START start = std::chrono::high_resolution_clock::now();
-#define END                                                                    \
-  end = std::chrono::high_resolution_clock::now();                             \
-  total_time +=                                                                \
-      std::chrono::duration_cast<std::chrono::microseconds>(end - start)       \
-          .count();
-#define RESULTS(kernel)                                                        \
-  std::cout << "Average Speed of Kernel " << kernel << " (" << runs            \
-            << " runs): " << std::fixed << std::setprecision(4)                \
-            << (total_time / runs) / 1000.0f << " ms" << std::endl;
+#define END \
+	end = std::chrono::high_resolution_clock::now(); \
+	total_time += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+#define RESULTS(kernel) \
+	std::cout << "Average Speed of Kernel " << kernel << " (" << runs << " runs): "\
+	<< std::fixed << std::setprecision(4) \
+	<< (total_time / runs) / 1000.0f << " ms" << std::endl;
 
 // Move these parameters to file scope so they can be modified by the autotuner
 const uint K10_NUM_THREADS = 128;
-const uint K10_BN = 64;
-const uint K10_BM = 128;
-const uint K10_BK = 8;
-const uint K10_WN = 32;
-const uint K10_WM = 64;
-const uint K10_WNITER = 2;
+const uint K10_BN = 256;
+const uint K10_BM = 256;
+const uint K10_BK = 64;
+const uint K10_WN = 64;
+const uint K10_WM = 256;
+const uint K10_WNITER = 8;
 const uint K10_TN = 4;
-const uint K10_TM = 4;
+const uint K10_TM = 16;
 
 void run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
                float *d_C, int runs) {
@@ -60,7 +58,8 @@ void run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     START
     basic<<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END 
+	cudaDeviceSynchronize();
   }
   RESULTS("Naive");
 }
@@ -73,7 +72,8 @@ void run_gmem_coalesce(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     START
     gmem_coalesce<32><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END 
+	cudaDeviceSynchronize();
   }
   RESULTS("GMEM Coalescing");
 }
@@ -86,7 +86,8 @@ void run_smem_blocking(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     START
     smem_blocking<32><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END 
+	cudaDeviceSynchronize();
   }
   RESULTS("SMEM Blocking");
 }
@@ -104,13 +105,15 @@ void run_one_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
     START
     one_blocktiling<BM, BN, BK, TM>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END 
+	cudaDeviceSynchronize();
   }
   RESULTS("1D Blocktiling")
 }
 
 void run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
                          float *d_C, int runs) {
+	
   constexpr int BM = 128;
   constexpr int BN = 128;
   constexpr int BK = 8;
@@ -119,11 +122,13 @@ void run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   dim3 blockDim(BM * BN / (TM * TN));
   SETUP
-  for (int i = 0; i < runs; i++) {
     START
+  for (int i = 0; i < runs; i++) {
+	START
     two_blocktiling<BM, BN, BK, TM, TN>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END 
+	cudaDeviceSynchronize();
   }
   RESULTS("2D Blocktiling")
 }
@@ -142,7 +147,8 @@ void run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
     START
     vectorized_blocktiling<BM, BN, BK, TM, TN>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END
+	cudaDeviceSynchronize();
   }
   RESULTS("Vectorized Blocktiling")
 }
@@ -153,20 +159,18 @@ void run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   dim3 blockDim(K10_NUM_THREADS);
 
   // Calculate NUM_WARPS based on K10_NUM_THREADS
-  const uint NUM_WARPS = K10_NUM_THREADS / 32;
+  //const uint NUM_WARPS = K10_NUM_THREADS / 32;
 
   // Calculate WMITER here
-  const uint K10_WMITER =
-      (K10_WM * K10_WN) / (32 * K10_TM * K10_TN * K10_WNITER);
+  //const uint K10_WMITER = (K10_WM * K10_WN) / (32 * K10_TM * K10_TN * K10_WNITER);
 
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
   SETUP
   for (int i = 0; i < runs; i++) {
-    START
-    warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM,
-               K10_TN, K10_NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+	START
+	warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  	END
+  	cudaDeviceSynchronize();
   }
   RESULTS("Warptiling")
 }
@@ -200,7 +204,6 @@ int main(int argc, char *argv[]) {
   constexpr int rows = 1024;
   constexpr int cols = 1024;
   constexpr int inners = 1024;
-  constexpr int blocksize = 32;
   int kernel_choice = 10; // Default to warptiling
   int runs = 10;          // Default number of runs
 
@@ -212,7 +215,8 @@ int main(int argc, char *argv[]) {
   if (argc > 2) {
     runs = atoi(argv[2]);
   }
-
+  kernel_choice = 10;
+  runs = 1;
   // Allocate host matrices
   float *h_A = (float *)malloc(rows * cols * sizeof(float));
   float *h_B = (float *)malloc(rows * cols * sizeof(float));
@@ -236,7 +240,6 @@ int main(int argc, char *argv[]) {
                             cudaMemcpyHostToDevice));
 
   // Run CPU matrix multiplication for reference
-  matrixMultiplyCPU(h_A, h_B, h_C_cpu, rows, cols, inners);
 
   // Choose kernel based on input
   switch (kernel_choice) {
@@ -262,7 +265,7 @@ int main(int argc, char *argv[]) {
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, runs);
     break;
   case 11:
-    run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+  //  run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
   default:
     std::cout << "Invalid kernel choice. Using warptiling (10) by default."

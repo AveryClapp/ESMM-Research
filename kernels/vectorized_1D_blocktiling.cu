@@ -21,15 +21,15 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 
 	// We calculate BM * BN elements per block, must find how many threads are
 	// needed total (including both dimensions)
-	const uint totalResultsBlocktile = BM * BN;
-	const uint numThreadsBlocktile = totalResultsBlocktile / (TM * TN);
+	const uint totalResultsBlocktile = BM;
+	const uint numThreadsBlocktile = totalResultsBlocktile / TM;
 
 	assert(numThreadsBlocktile == blockDim.x);
 
 	// Blocked groups of cols and sequential rows
 	// Assign threadCol and threadRow in row-major order 
-	const int threadCol = threadIdx.x % (BN / TN);
-	const int threadRow = threadIdx.x / (BN / TN);
+	const int threadCol = threadIdx.x % BN;
+	const int threadRow = threadIdx.x / BN;
 
 	__shared__ float As[BM * BK];
 	__shared__ float Bs[BK * BN];
@@ -44,11 +44,7 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
   	const uint innerRowB = threadIdx.x / (BN / 4);
 	const uint innerColB = threadIdx.x % (BN / 4);
 
-	float threadResults[TM * TN] = {0.0}; // All thread results
-
-	// Middle loop caching
-	float regM[TM] = {0.0};
-	float regN[TN] = {0.0}; 
+	float threadResults[TM] = {0.0};
 
 	// Every advance the block through the matrix
 	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
@@ -68,24 +64,13 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 
 		// Advance the matrix pointers to the start of the next block
 		A += BK;
-		B += BK * N;
-			
-		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			// Store values to be used in inner loop
-			for (uint i = 0; i < TM; ++i) {
-				regM[i] = As[dotIdx * BM + threadRow * TM + i];
-			}
-			// Store values to be used in inner loop
-			for (uint i = 0; i < TN; ++i) {
-				regN[i] = Bs[dotIdx * BN + threadCol * TN + i];
-			}
+		B += BK * N;			
 
-			// Calculate TM * TN elements in current block
-			for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
-				for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
-					threadResults[resIdxM * TN + resIdxN] +=
-						regM[resIdxM] * regN[resIdxN];
-				}
+		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
+			float tmpB = Bs[dotIdx * BN + threadCol];
+			for (uint resIdx = 0; resIdx < TM; ++resIdx) {
+				/* As is now transposed, so rearrange thread indexing */
+				threadResults[resIdx] += As[dotIdx * TM + (threadRow * TM + resIdx)] * tmpB;
 			}
 		}
 		__syncthreads();

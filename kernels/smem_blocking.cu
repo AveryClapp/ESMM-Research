@@ -1,5 +1,7 @@
 #pragma once
 
+/* Kernel #3 in Siboehm's blog, Shared Memory Cache-Blocking */
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>

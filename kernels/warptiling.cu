@@ -1,5 +1,7 @@
 #pragma once
 
+/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
+
 #include <algorithm>
 #include <cassert>
 #include <cstdio>

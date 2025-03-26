@@ -26,18 +26,20 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
   }
 }
 
-#define SETUP \
-	auto start = std::chrono::high_resolution_clock::now(); \
-	auto end = std::chrono::high_resolution_clock::now(); \
-	double total_time = 0.0f;
+#define SETUP                                                                  \
+  auto start = std::chrono::high_resolution_clock::now();                      \
+  auto end = std::chrono::high_resolution_clock::now();                        \
+  double total_time = 0.0f;
 #define START start = std::chrono::high_resolution_clock::now();
-#define END \
-	end = std::chrono::high_resolution_clock::now(); \
-	total_time += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-#define RESULTS(kernel) \
-	std::cout << "Average Speed of Kernel " << kernel << " (" << runs << " runs): "\
-	<< std::fixed << std::setprecision(4) \
-	<< (total_time / runs) / 1000.0f << " ms" << std::endl;
+#define END                                                                    \
+  end = std::chrono::high_resolution_clock::now();                             \
+  total_time +=                                                                \
+      std::chrono::duration_cast<std::chrono::microseconds>(end - start)       \
+          .count();
+#define RESULTS(kernel)                                                        \
+  std::cout << "Average Speed of Kernel " << kernel << " (" << runs            \
+            << " runs): " << std::fixed << std::setprecision(4)                \
+            << (total_time / runs) / 1000.0f << " ms" << std::endl;
 
 void run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
                float *d_C, int runs) {
@@ -47,8 +49,7 @@ void run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     START
     basic<<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END 
-	cudaDeviceSynchronize();
+    END cudaDeviceSynchronize();
   }
   RESULTS("Naive");
 }
@@ -61,8 +62,7 @@ void run_gmem_coalesce(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     START
     gmem_coalesce<32><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END 
-	cudaDeviceSynchronize();
+    END cudaDeviceSynchronize();
   }
   RESULTS("GMEM Coalescing");
 }
@@ -75,8 +75,7 @@ void run_smem_blocking(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     START
     smem_blocking<32><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END 
-	cudaDeviceSynchronize();
+    END cudaDeviceSynchronize();
   }
   RESULTS("SMEM Blocking");
 }
@@ -94,15 +93,14 @@ void run_one_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
     START
     one_blocktiling<BM, BN, BK, TM>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END 
-	cudaDeviceSynchronize();
+    END cudaDeviceSynchronize();
   }
   RESULTS("1D Blocktiling")
 }
 
 void run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
                          float *d_C, int runs) {
-	
+
   constexpr int BM = 128;
   constexpr int BN = 128;
   constexpr int BK = 8;
@@ -111,13 +109,12 @@ void run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   dim3 blockDim(BM * BN / (TM * TN));
   SETUP
-    START
+  START
   for (int i = 0; i < runs; i++) {
-	START
+    START
     two_blocktiling<BM, BN, BK, TM, TN>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END 
-	cudaDeviceSynchronize();
+    END cudaDeviceSynchronize();
   }
   RESULTS("2D Blocktiling")
 }
@@ -136,14 +133,13 @@ void run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
     START
     vectorized_blocktiling<BM, BN, BK, TM, TN>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END
-	cudaDeviceSynchronize();
-1;
+    END cudaDeviceSynchronize();
+  }
   RESULTS("Vectorized Blocktiling")
 }
 
-void run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
-                    float *d_C, int runs) {
+bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs) {
 
   const uint K10_NUM_THREADS = 256;
   const uint K10_BN = 256;
@@ -156,26 +152,42 @@ void run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   const uint K10_TM = 8;
 
   dim3 blockDim(K10_NUM_THREADS);
- 
-  const size_t sharedMemSize = (K10_BM * K10_BK + K10_BK * K10_BN) * sizeof(float);
+
+  const size_t sharedMemSize =
+      (K10_BM * K10_BK + K10_BK * K10_BN) * sizeof(float);
 
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+
+  // Initialize C to zeros
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
   SETUP
   for (int i = 0; i < runs; i++) {
-	START
-	warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim, sharedMemSize>>>(rows, cols, inners, d_A, d_B, d_C);
-  	END
-	cudaError_t	error = cudaGetLastError();
-	if (error != cudaSuccess) {
-		printf("CUDA error during kernel launch: %s\n", cudaGetErrorString(error));
-	}
-  	cudaDeviceSynchronize();
-	error = cudaGetLastError();
-	if (error != cudaSuccess) {
-		printf("CUDA error during kernel launch: %s\n", cudaGetErrorString(error));
-	}
+    START
+    warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM,
+               K10_TN, K10_NUM_THREADS><<<gridDim, blockDim, sharedMemSize>>>(
+        rows, cols, inners, d_A, d_B, d_C);
+    END cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+      printf("CUDA error during kernel launch: %s\n",
+             cudaGetErrorString(error));
+      return false;
+    }
+    cudaDeviceSynchronize();
+    error = cudaGetLastError();
+    if (error != cudaSuccess) {
+      printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(error));
+      return false;
+    }
   }
   RESULTS("Warptiling")
+
+  // Copy result back to host for verification
+  cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float),
+                            cudaMemcpyDeviceToHost));
+
+  // Compare with reference CPU implementation
+  return verifyResults(h_C, h_C_ref, rows * cols);
 }
 
 void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
@@ -197,7 +209,6 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   }
   cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float),
                             cudaMemcpyDeviceToHost));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
   RESULTS("cuBLAS")
   cublasDestroy(handle);
 }
@@ -218,31 +229,46 @@ int main(int argc, char *argv[]) {
   if (argc > 2) {
     runs = atoi(argv[2]);
   }
-  // Run all kernels
-  kernel_choice = 12;
-  runs = 1;
+
+  std::cout << "Matrix dimensions: " << rows << "x" << cols << " * " << cols
+            << "x" << inners << std::endl;
+  std::cout << "Running kernel: " << kernel_choice << " for " << runs
+            << " iterations" << std::endl;
+
   // Allocate host matrices
-  float *h_A = (float *)malloc(rows * cols * sizeof(float));
-  float *h_B = (float *)malloc(rows * cols * sizeof(float));
+  float *h_A = (float *)malloc(rows * inners * sizeof(float));
+  float *h_B = (float *)malloc(inners * cols * sizeof(float));
   float *h_C = (float *)malloc(rows * cols * sizeof(float));
-  float *h_C_cpu = (float *)malloc(rows * cols * sizeof(float));
+  float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
   // Generate random data
-  randomize_matrix(h_A, rows, cols);
-  randomize_matrix(h_B, rows, cols);
+  randomize_matrix(h_A, rows, inners);
+  randomize_matrix(h_B, inners, cols);
+
+  // Set h_C to zeros
+  memset(h_C, 0, rows * cols * sizeof(float));
 
   // Allocate device matrices
   float *d_A, *d_B, *d_C;
-  cudaCheckError(cudaMalloc(&d_A, rows * cols * sizeof(float)));
-  cudaCheckError(cudaMalloc(&d_B, rows * cols * sizeof(float)));
+  cudaCheckError(cudaMalloc(&d_A, rows * inners * sizeof(float)));
+  cudaCheckError(cudaMalloc(&d_B, inners * cols * sizeof(float)));
   cudaCheckError(cudaMalloc(&d_C, rows * cols * sizeof(float)));
 
   // Copy random data to device matrices
-  cudaCheckError(cudaMemcpy(d_A, h_A, rows * cols * sizeof(float),
+  cudaCheckError(cudaMemcpy(d_A, h_A, rows * inners * sizeof(float),
                             cudaMemcpyHostToDevice));
-  cudaCheckError(cudaMemcpy(d_B, h_B, rows * cols * sizeof(float),
+  cudaCheckError(cudaMemcpy(d_B, h_B, inners * cols * sizeof(float),
                             cudaMemcpyHostToDevice));
 
+  // Generate reference solution on CPU
+  std::cout << "Computing reference solution on CPU..." << std::endl;
+  matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+  std::cout << "Reference solution computed." << std::endl;
+
+  // Initialize d_C to zeros
+  cudaCheckError(cudaMemset(d_C, 0, rows * cols * sizeof(float)));
+
+  bool verificationResult = true;
 
   // Choose kernel based on input
   switch (kernel_choice) {
@@ -265,10 +291,11 @@ int main(int argc, char *argv[]) {
     run_vectorized(rows, cols, inners, d_A, d_B, d_C, runs);
     break;
   case 10:
-    run_warptiling(rows, cols, inners, d_A, d_B, d_C, runs);
+    verificationResult =
+        run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 11:
-  	run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+    run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
   case 12:
     run_naive(rows, cols, inners, d_A, d_B, d_C, runs);
@@ -277,22 +304,29 @@ int main(int argc, char *argv[]) {
     run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
     run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
     run_vectorized(rows, cols, inners, d_A, d_B, d_C, runs);
-    run_warptiling(rows, cols, inners, d_A, d_B, d_C, runs);
-  	run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
-	break;
+    verificationResult =
+        run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+    break;
   default:
     std::cout << "Invalid kernel choice. Using warptiling (10) by default."
               << std::endl;
-	break;
+    verificationResult =
+        run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    break;
+  }
+
+  if (!verificationResult) {
+    std::cout << "WARNING: Verification failed!" << std::endl;
   }
 
   // Clean up
   free(h_A);
   free(h_B);
   free(h_C);
-  free(h_C_cpu);
+  free(h_C_ref);
   cudaFree(d_A);
   cudaFree(d_B);
   cudaFree(d_C);
-  return 0;
+  return verificationResult ? 0 : 1;
 }

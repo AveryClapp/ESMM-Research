@@ -44,8 +44,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 
-	__shared__ float As[BM * BK];
-	__shared__ float Bs[BK * BN];
+	extern __shared__ float sharedMem[];	
+	float *As = sharedMem;
+	float *Bs = sharedMem + (BM * BK);
 
 	A += cRow * BM * K;
 	B += cCol * BN;

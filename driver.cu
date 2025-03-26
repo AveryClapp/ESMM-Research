@@ -39,17 +39,6 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
 	<< std::fixed << std::setprecision(4) \
 	<< (total_time / runs) / 1000.0f << " ms" << std::endl;
 
-// Move these parameters to file scope so they can be modified by the autotuner
-const uint K10_NUM_THREADS = 128;
-const uint K10_BN = 256;
-const uint K10_BM = 256;
-const uint K10_BK = 64;
-const uint K10_WN = 64;
-const uint K10_WM = 256;
-const uint K10_WNITER = 8;
-const uint K10_TN = 4;
-const uint K10_TM = 16;
-
 void run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
                float *d_C, int runs) {
   dim3 gridDim(CEIL_DIV(cols, 32), CEIL_DIV(rows, 32));
@@ -149,28 +138,42 @@ void run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
     END
 	cudaDeviceSynchronize();
-  }
+1;
   RESULTS("Vectorized Blocktiling")
 }
 
 void run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, int runs) {
-  // Using global constants now
+
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 256;
+  const uint K10_BM = 256;
+  const uint K10_BK = 64;
+  const uint K10_WN = 64;
+  const uint K10_WM = 128;
+  const uint K10_WNITER = 1;
+  const uint K10_TN = 8;
+  const uint K10_TM = 8;
+
   dim3 blockDim(K10_NUM_THREADS);
-
-  // Calculate NUM_WARPS based on K10_NUM_THREADS
-  //const uint NUM_WARPS = K10_NUM_THREADS / 32;
-
-  // Calculate WMITER here
-  //const uint K10_WMITER = (K10_WM * K10_WN) / (32 * K10_TM * K10_TN * K10_WNITER);
+ 
+  const size_t sharedMemSize = (K10_BM * K10_BK + K10_BK * K10_BN) * sizeof(float);
 
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
   SETUP
   for (int i = 0; i < runs; i++) {
 	START
-	warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+	warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim, sharedMemSize>>>(rows, cols, inners, d_A, d_B, d_C);
   	END
+	cudaError_t	error = cudaGetLastError();
+	if (error != cudaSuccess) {
+		printf("CUDA error during kernel launch: %s\n", cudaGetErrorString(error));
+	}
   	cudaDeviceSynchronize();
+	error = cudaGetLastError();
+	if (error != cudaSuccess) {
+		printf("CUDA error during kernel launch: %s\n", cudaGetErrorString(error));
+	}
   }
   RESULTS("Warptiling")
 }
@@ -215,7 +218,8 @@ int main(int argc, char *argv[]) {
   if (argc > 2) {
     runs = atoi(argv[2]);
   }
-  kernel_choice = 10;
+  // Run all kernels
+  kernel_choice = 12;
   runs = 1;
   // Allocate host matrices
   float *h_A = (float *)malloc(rows * cols * sizeof(float));
@@ -239,7 +243,6 @@ int main(int argc, char *argv[]) {
   cudaCheckError(cudaMemcpy(d_B, h_B, rows * cols * sizeof(float),
                             cudaMemcpyHostToDevice));
 
-  // Run CPU matrix multiplication for reference
 
   // Choose kernel based on input
   switch (kernel_choice) {
@@ -265,12 +268,22 @@ int main(int argc, char *argv[]) {
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, runs);
     break;
   case 11:
-  //  run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+  	run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
+  case 12:
+    run_naive(rows, cols, inners, d_A, d_B, d_C, runs);
+    run_gmem_coalesce(rows, cols, inners, d_A, d_B, d_C, runs);
+    run_smem_blocking(rows, cols, inners, d_A, d_B, d_C, runs);
+    run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
+    run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
+    run_vectorized(rows, cols, inners, d_A, d_B, d_C, runs);
+    run_warptiling(rows, cols, inners, d_A, d_B, d_C, runs);
+  	run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+	break;
   default:
     std::cout << "Invalid kernel choice. Using warptiling (10) by default."
               << std::endl;
-    run_warptiling(rows, cols, inners, d_A, d_B, d_C, runs);
+	break;
   }
 
   // Clean up

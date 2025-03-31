@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef UTILS_CUH
 #define UTILS_CUH
 #include <cuda_runtime.h>
@@ -97,8 +99,6 @@ bool verifyResults(const float *gpuResults, const float *cpuResults, int size,
     return false;
   }
 
-  std::cout << "Verification successful: All results match within tolerance "
-            << tolerance << std::endl;
   return true;
 }
 #endif

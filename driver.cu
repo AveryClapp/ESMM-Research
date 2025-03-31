@@ -5,6 +5,7 @@
 #include "./kernels/smem_blocking.cu"
 #include "./kernels/vectorized_blocktiling.cu"
 #include "./kernels/warptiling.cu"
+#include "./kernels/1D_vec.cu"
 #include "utils.cuh"
 #include <chrono>
 #include <cublas_v2.h>
@@ -98,18 +99,17 @@ void run_one_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
   RESULTS("1D Blocktiling")
 }
 
-void run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
-                         float *d_C, int runs) {
+bool run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
+                         float *d_C, float *h_C, float*  h_C_ref, int runs) {
 
-  constexpr int BM = 128;
-  constexpr int BN = 128;
+  constexpr int BM = 64;
+  constexpr int BN = 64;
   constexpr int BK = 8;
   constexpr int TM = 8;
-  constexpr int TN = 8;
+  constexpr int TN = 1;
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   dim3 blockDim(BM * BN / (TM * TN));
   SETUP
-  START
   for (int i = 0; i < runs; i++) {
     START
     two_blocktiling<BM, BN, BK, TM, TN>
@@ -117,15 +117,47 @@ void run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
     END cudaDeviceSynchronize();
   }
   RESULTS("2D Blocktiling")
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+	printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
+ return verifyResults(h_C, h_C_ref, rows * cols);
 }
 
-void run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
-                    float *d_C, int runs) {
-  constexpr int BM = 128;
-  constexpr int BN = 128;
+bool run_1d_vec(int rows, int cols, int inners, float *d_A, float *d_B,
+                         float *d_C, float *h_C, float *h_C_ref, int runs) {
+  constexpr int BM = 64;
+  constexpr int BN = 64;
   constexpr int BK = 8;
   constexpr int TM = 8;
-  constexpr int TN = 8;
+  constexpr int TN = 1;
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  dim3 blockDim(BM * BN / (TM * TN));
+  SETUP
+  for (int i = 0; i < runs; i++) {
+    START
+    one_d_vec<BM, BN, BK, TM, TN>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    END 
+	cudaDeviceSynchronize();
+  }
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+	printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
+  RESULTS("1D Vectorized Blocktiling")
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  return verifyResults(h_C, h_C_ref, rows * cols);
+}
+
+bool run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs) {
+  constexpr int BM = 64;
+  constexpr int BN = 64;
+  constexpr int BK = 8;
+  constexpr int TM = 8;
+  constexpr int TN = 1;
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   dim3 blockDim(BM * BN / (TM * TN));
   SETUP
@@ -133,28 +165,34 @@ void run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
     START
     vectorized_blocktiling<BM, BN, BK, TM, TN>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END cudaDeviceSynchronize();
+    END
+	cudaDeviceSynchronize();
   }
-  RESULTS("Vectorized Blocktiling")
+  RESULTS("2D Vectorized Blocktiling")
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+	printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  return verifyResults(h_C, h_C_ref, rows * cols);
+
 }
 
 bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
 
-  const uint K10_NUM_THREADS = 256;
-  const uint K10_BN = 256;
-  const uint K10_BM = 256;
-  const uint K10_BK = 64;
-  const uint K10_WN = 64;
-  const uint K10_WM = 128;
-  const uint K10_WNITER = 1;
-  const uint K10_TN = 8;
-  const uint K10_TM = 8;
+  constexpr uint K10_NUM_THREADS = 128;
+  constexpr uint K10_BN = 128;
+  constexpr uint K10_BM = 128;
+  constexpr uint K10_BK = 16;
+  constexpr uint K10_WN = 64;
+  constexpr uint K10_WM = 64;
+  constexpr uint K10_WNITER = 4;
+  constexpr uint K10_TN = 4;
+  constexpr uint K10_TM = 8;
 
   dim3 blockDim(K10_NUM_THREADS);
 
-  const size_t sharedMemSize =
-      (K10_BM * K10_BK + K10_BK * K10_BN) * sizeof(float);
 
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
 
@@ -164,21 +202,9 @@ bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   SETUP
   for (int i = 0; i < runs; i++) {
     START
-    warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM,
-               K10_TN, K10_NUM_THREADS><<<gridDim, blockDim, sharedMemSize>>>(
-        rows, cols, inners, d_A, d_B, d_C);
-    END cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      printf("CUDA error during kernel launch: %s\n",
-             cudaGetErrorString(error));
-      return false;
-    }
+    warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+	END 
     cudaDeviceSynchronize();
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(error));
-      return false;
-    }
   }
   RESULTS("Warptiling")
 
@@ -215,11 +241,11 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 
 int main(int argc, char *argv[]) {
   // Setup
-  constexpr int rows = 1024;
-  constexpr int cols = 1024;
-  constexpr int inners = 1024;
-  int kernel_choice = 10; // Default to warptiling
-  int runs = 10;          // Default number of runs
+  constexpr int rows = 512;
+  constexpr int cols = 512;
+  constexpr int inners = 512;
+  int kernel_choice = 12; // Default to warptiling
+  int runs = 1;          // Default number of runs
 
   // Parse command line arguments
   if (argc > 1) {
@@ -229,11 +255,6 @@ int main(int argc, char *argv[]) {
   if (argc > 2) {
     runs = atoi(argv[2]);
   }
-
-  std::cout << "Matrix dimensions: " << rows << "x" << cols << " * " << cols
-            << "x" << inners << std::endl;
-  std::cout << "Running kernel: " << kernel_choice << " for " << runs
-            << " iterations" << std::endl;
 
   // Allocate host matrices
   float *h_A = (float *)malloc(rows * inners * sizeof(float));
@@ -282,13 +303,14 @@ int main(int argc, char *argv[]) {
     run_smem_blocking(rows, cols, inners, d_A, d_B, d_C, runs);
     break;
   case 4:
-    run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
+    //run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
+	std::cout << run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 5:
-    run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
+	std::cout << run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 6:
-    run_vectorized(rows, cols, inners, d_A, d_B, d_C, runs);
+	std::cout << run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 10:
     verificationResult =
@@ -302,11 +324,10 @@ int main(int argc, char *argv[]) {
     run_gmem_coalesce(rows, cols, inners, d_A, d_B, d_C, runs);
     run_smem_blocking(rows, cols, inners, d_A, d_B, d_C, runs);
     run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
-    run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
-    run_vectorized(rows, cols, inners, d_A, d_B, d_C, runs);
-    verificationResult =
-        run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-    run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+    run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    //run_vectorized(rows, cols, inners, d_A, d_B, d_C, runs);
+    //run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   default:
     std::cout << "Invalid kernel choice. Using warptiling (10) by default."

@@ -14,7 +14,7 @@ TN_VALUES=(4 8 16 32)
 NUM_THREADS_VALUES=(128 256)
 
 RUNNER="./driver.cu"
-OUTPUT="./kernel_10_autotune_results.txt"
+OUTPUT="./test.txt"
 
 # Clear the output file
 echo "" > $OUTPUT

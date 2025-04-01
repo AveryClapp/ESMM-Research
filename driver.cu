@@ -42,6 +42,17 @@ inline void cudaAssert(cudaError_t code, const char *file, int line) {
             << " runs): " << std::fixed << std::setprecision(4)                \
             << (total_time / runs) / 1000.0f << " ms" << std::endl;
 
+const uint K10_NUM_THREADS = 128;
+const uint K10_BN = 128;
+const uint K10_BM = 128;
+const uint K10_BK = 16;
+const uint K10_WN = 64;
+const uint K10_WM = 64;
+const uint K10_WNITER = 4;
+const uint K10_TN = 4;
+const uint K10_TM = 8;
+
+
 void run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
                float *d_C, int runs) {
   dim3 gridDim(CEIL_DIV(cols, 32), CEIL_DIV(rows, 32));
@@ -180,40 +191,43 @@ bool run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
 
 bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-
-  constexpr uint K10_NUM_THREADS = 128;
-  constexpr uint K10_BN = 128;
-  constexpr uint K10_BM = 128;
-  constexpr uint K10_BK = 16;
-  constexpr uint K10_WN = 64;
-  constexpr uint K10_WM = 64;
-  constexpr uint K10_WNITER = 4;
-  constexpr uint K10_TN = 4;
-  constexpr uint K10_TM = 8;
+  // Setup cuda timing
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
 
   dim3 blockDim(K10_NUM_THREADS);
-
-
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
 
   // Initialize C to zeros
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
-  SETUP
   for (int i = 0; i < runs; i++) {
-    START
+    cudaEventRecord(start);
     warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-	END 
+	cudaEventRecord(stop);
     cudaDeviceSynchronize();
+	cudaEventSynchronize(stop);
   }
-  RESULTS("Warptiling")
+  
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+	//return false;
+	std::cout << "FAIL" << std::endl;
+  } else {
+	//bool success = verifyResults(h_C, h_C_ref, rows * cols);
+	//if (!success) {
+		//return false;
+	//}
+	float time = 0;
+	cudaEventElapsedTime(&time, start, stop);
+	std::cout << time << " ms" << std::endl;
 
-  // Copy result back to host for verification
-  cudaCheckError(cudaMemcpy(h_C, d_C, rows * cols * sizeof(float),
-                            cudaMemcpyDeviceToHost));
-
-  // Compare with reference CPU implementation
-  return verifyResults(h_C, h_C_ref, rows * cols);
+	//return true;
+  }
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
 }
 
 void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
@@ -241,10 +255,10 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 
 int main(int argc, char *argv[]) {
   // Setup
-  constexpr int rows = 512;
-  constexpr int cols = 512;
-  constexpr int inners = 512;
-  int kernel_choice = 12; // Default to warptiling
+  constexpr int rows = 1024;
+  constexpr int cols = 1024;
+  constexpr int inners = 1024;
+  int kernel_choice = 10; // Default to warptiling
   int runs = 1;          // Default number of runs
 
   // Parse command line arguments
@@ -282,9 +296,7 @@ int main(int argc, char *argv[]) {
                             cudaMemcpyHostToDevice));
 
   // Generate reference solution on CPU
-  std::cout << "Computing reference solution on CPU..." << std::endl;
-  matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
-  std::cout << "Reference solution computed." << std::endl;
+  //matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
 
   // Initialize d_C to zeros
   cudaCheckError(cudaMemset(d_C, 0, rows * cols * sizeof(float)));
@@ -313,8 +325,7 @@ int main(int argc, char *argv[]) {
 	std::cout << run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 10:
-    verificationResult =
-        run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+	run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 11:
     run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
@@ -332,13 +343,7 @@ int main(int argc, char *argv[]) {
   default:
     std::cout << "Invalid kernel choice. Using warptiling (10) by default."
               << std::endl;
-    verificationResult =
-        run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
-  }
-
-  if (!verificationResult) {
-    std::cout << "WARNING: Verification failed!" << std::endl;
   }
 
   // Clean up

@@ -22,6 +22,7 @@ echo "" > $OUTPUT
 # Set GPU to use
 export DEVICE="0"
 WARPSIZE=32
+MAX_SHARED_MEM=101376
 
 
 TOTAL_CONFIGS="$(( ${#BK_VALUES[@]} * ${#BM_VALUES[@]} * ${#BN_VALUES[@]} * ${#WM_VALUES[@]} * ${#WN_VALUES[@]} * ${#WNITER_VALUES[@]} * ${#TM_VALUES[@]} * ${#TN_VALUES[@]} * ${#NUM_THREADS_VALUES[@]} ))"
@@ -38,10 +39,14 @@ for TM in "${TM_VALUES[@]}"; do
 for TN in "${TN_VALUES[@]}"; do
 for NUM_THREADS in "${NUM_THREADS_VALUES[@]}"; do
 echo ""
+SHARED_MEM_SIZE=$(( (BM * BK + BK * BN) * 4 ))
 CONFIG_NUM=$(( CONFIG_NUM + 1 ))
 # skip configurations that don't fullfil preconditions
 NUM_WARPS=$(( NUM_THREADS / 32 ))
 if ! (( BN % WN == 0 && BM % WM == 0 )); then
+  continue
+fi
+if (( SHARED_MEM_SIZE > MAX_SHARED_MEM )); then
   continue
 fi
 if ! (( (BN / WN) * (BM / WM) == NUM_WARPS )); then

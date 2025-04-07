@@ -38,7 +38,6 @@ for WN_ITER in "${WNITER_VALUES[@]}"; do
 for TM in "${TM_VALUES[@]}"; do
 for TN in "${TN_VALUES[@]}"; do
 for NUM_THREADS in "${NUM_THREADS_VALUES[@]}"; do
-echo ""
 SHARED_MEM_SIZE=$(( (BM * BK + BK * BN) * 4 ))
 CONFIG_NUM=$(( CONFIG_NUM + 1 ))
 # skip configurations that don't fullfil preconditions
@@ -90,8 +89,7 @@ sed -i "s/const uint K10_TM = .*/const uint K10_TM = $TM;/" $RUNNER
 sed -i "s/const uint K10_TN = .*/const uint K10_TN = $TN;/" $RUNNER
 
 # Rebuild the program
-nvcc driver.cu -lcublas -o sgemm
-
+nvcc driver.cu -lcublas -o sgemm || { echo "Compilation failed"; break; }
 echo "($CONFIG_NUM/$TOTAL_CONFIGS): BK=$BK BM=$BM BN=$BN WM=$WM WN=$WN WN_ITER=$WN_ITER TM=$TM TN=$TN NUM_THREADS=$NUM_THREADS" |& tee -a $OUTPUT
 # Run the benchmark and get the result
 # Kill the program after 4 seconds if it doesn't finish

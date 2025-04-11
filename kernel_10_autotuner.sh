@@ -13,8 +13,8 @@ TM_VALUES=(4 8 16 32)
 TN_VALUES=(4 8 16 32)
 NUM_THREADS_VALUES=(128 256)
 
-RUNNER="./driver.cu"
-OUTPUT="./test.txt"
+RUNNER="./profiler.cu"
+OUTPUT="./results.txt"
 
 # Clear the output file
 echo "" > $OUTPUT
@@ -89,7 +89,7 @@ sed -i "s/const uint K10_TM = .*/const uint K10_TM = $TM;/" $RUNNER
 sed -i "s/const uint K10_TN = .*/const uint K10_TN = $TN;/" $RUNNER
 
 # Rebuild the program
-nvcc driver.cu -lcublas -o sgemm || { echo "Compilation failed"; break; }
+nvcc profiler.cu -o sgemm || { echo "Compilation failed"; break; }
 echo "($CONFIG_NUM/$TOTAL_CONFIGS): BK=$BK BM=$BM BN=$BN WM=$WM WN=$WN WN_ITER=$WN_ITER TM=$TM TN=$TN NUM_THREADS=$NUM_THREADS" |& tee -a $OUTPUT
 # Run the benchmark and get the result
 # Kill the program after 4 seconds if it doesn't finish

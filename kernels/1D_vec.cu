@@ -19,7 +19,7 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 	const uint cCol = blockIdx.x;
 
 	// We calculate BM * BN elements per block, must find how many threads are
-	// needed total (including both dimensions)
+	// needed total
 	const uint totalResultsBlocktile = BM * BN;
 	const uint numThreadsBlocktile = totalResultsBlocktile / (TM);
 
@@ -40,15 +40,14 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 
 	const uint innerRowA = threadIdx.x / (BK / 4);
 	const uint innerColA = threadIdx.x % (BK / 4);
-  	//const uint innerRowB = threadIdx.x / (BN / 4);
-	//const uint innerColB = threadIdx.x % (BN / 4);
+  	const uint innerRowB = threadIdx.x / (BN / 4);
+	const uint innerColB = threadIdx.x % (BN / 4);
 
 	float threadResults[TM] = {0.0}; // All thread results
 
 	// Every advance the block through the matrix
 	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		float4 tmp = 
-		  reinterpret_cast<const float4 *>(&A[innerRowA * K + innerColA * 4])[0];
+		float4 tmp = reinterpret_cast<const float4 *>(&A[innerRowA * K + innerColA * 4])[0];
 		
 		// Load elements from row major order in A to column major in As
 		As[(innerColA * 4 + 0) * BM + innerRowA] = tmp.x;
@@ -57,29 +56,28 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 		As[(innerColA * 4 + 3) * BM + innerRowA] = tmp.w;
 
 		// Load the float4 value from global memory
-		//reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] =
-			//reinterpret_cast<float4 *>(&B[innerRowB * N + innerColB * 4])[0];
+		reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] = reinterpret_cast<float4 *>(&B[innerRowB * N + innerColB * 4])[0];
+
 		__syncthreads();
 
 		// Advance the matrix pointers to the start of the next block
-		const float* B_cur = B;
 		A += BK;
 		B += BK * N;
 			
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			// Just one element, can simplify this when it starts to work
 			// This goes down the column of B (BK elems)
-			float bTmp = B_cur[dotIdx * N + threadCol];
+			float bTmp = Bs[dotIdx * BN + threadCol];
 
-			// Calculate TM * TN elements in current block
+			// Calculate TM elements for every thread
 			for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
-					threadResults[resIdxM] += As[dotIdx * BM + threadRow * TM + resIdxM] * bTmp;
+				threadResults[resIdxM] += As[dotIdx * BM + threadRow * TM + resIdxM] * bTmp;
 			}
 		}
 		__syncthreads();
 	}
 
+	// Apply thread results
 	for (uint resIdx = 0; resIdx < TM; ++resIdx) {
-			    C[(threadRow * TM + resIdx) * N + threadCol] = threadResults[resIdx];
+		C[(threadRow * TM + resIdx) * N + threadCol] = threadResults[resIdx];
 	}
 }

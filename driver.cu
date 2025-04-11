@@ -109,8 +109,8 @@ bool run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
 
 bool run_1d_vec(int rows, int cols, int inners, float *d_A, float *d_B,
                          float *d_C, float *h_C, float *h_C_ref, int runs) {
-  constexpr int BM = 64;
-  constexpr int BN = 64;
+  constexpr int BM = 32;
+  constexpr int BN = 32;
   constexpr int BK = 8;
   constexpr int TM = 8;
   constexpr int TN = 1;
@@ -186,13 +186,13 @@ bool run_warptiling_two(int rows, int cols, int inners, float *d_A, float *d_B,
 	//return false;
 	std::cout << "FAIL" << std::endl;
   } else {
-	//bool success = verifyResults(h_C, h_C_ref, rows * cols);
-	//if (!success) {
-		//return false;
-	//}
-	//float time = 0;
-	//cudaEventElapsedTime(&time, start, stop);
-	//std::cout << time << " ms" << std::endl;
+	bool success = verifyResults(h_C, h_C_ref, rows * cols);
+	if (!success) {
+		return false;
+	}
+	float time = 0;
+	cudaEventElapsedTime(&time, start, stop);
+	std::cout << time << " ms" << std::endl;
 
 	//return true;
   }
@@ -206,16 +206,15 @@ bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
-  const uint K10_NUM_THREADS = 128;
-  const uint K10_BN = 64;
-  const uint K10_BM = 128;
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 32;
+  const uint K10_BM = 64;
   const uint K10_BK = 16;
-  const uint K10_WN = 32;
-  const uint K10_WM = 64;
-  const uint K10_WNITER = 2;
-  const uint K10_TN = 4;
-  const uint K10_TM = 4;
-
+  const uint K10_WN = 8;
+  const uint K10_WM = 32;
+  const uint K10_WNITER = 1;
+  const uint K10_TN = 8;
+  const uint K10_TM = 1;
   dim3 blockDim(K10_NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
 
@@ -236,13 +235,13 @@ bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
 	//return false;
 	std::cout << "FAIL" << std::endl;
   } else {
-	//bool success = verifyResults(h_C, h_C_ref, rows * cols);
-	//if (!success) {
-		//return false;
-	//}
-	//float time = 0;
-	//cudaEventElapsedTime(&time, start, stop);
-	//std::cout << time << " ms" << std::endl;
+	bool success = verifyResults(h_C, h_C_ref, rows * cols);
+	if (!success) {
+		return false;
+	}
+	float time = 0;
+	cudaEventElapsedTime(&time, start, stop);
+	std::cout << time << " ms" << std::endl;
 
 	//return true;
   }
@@ -275,7 +274,7 @@ int main(int argc, char *argv[]) {
   constexpr int rows = 512;
   constexpr int cols = 512;
   constexpr int inners = 512;
-  int kernel_choice = 12; // Default to warptiling
+  int kernel_choice = 5; // Default to warptiling
   int runs = 1;          // Default number of runs
 
   // Parse command line arguments
@@ -313,7 +312,7 @@ int main(int argc, char *argv[]) {
                             cudaMemcpyHostToDevice));
 
   // Generate reference solution on CPU
-  //matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+  matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
 
   // Initialize d_C to zeros
   cudaCheckError(cudaMemset(d_C, 0, rows * cols * sizeof(float)));
@@ -336,13 +335,13 @@ int main(int argc, char *argv[]) {
 	std::cout << run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 5:
-	std::cout << run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
+	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 6:
 	std::cout << run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 10:
-    run_warptiling_two(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 11:
 	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);

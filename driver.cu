@@ -109,8 +109,8 @@ bool run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
 
 bool run_1d_vec(int rows, int cols, int inners, float *d_A, float *d_B,
                          float *d_C, float *h_C, float *h_C_ref, int runs) {
-  constexpr int BM = 32;
-  constexpr int BN = 32;
+  constexpr int BM = 64;
+  constexpr int BN = 64;
   constexpr int BK = 8;
   constexpr int TM = 8;
   constexpr int TN = 1;
@@ -271,10 +271,10 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 
 int main(int argc, char *argv[]) {
   // Setup
-  constexpr int rows = 1024;
-  constexpr int cols = 1024;
-  constexpr int inners = 1024;
-  int kernel_choice = 12; // Default to warptiling
+  constexpr int rows = 512;
+  constexpr int cols = 512;
+  constexpr int inners = 512;
+  int kernel_choice = 5; // Default to warptiling
   int runs = 1;          // Default number of runs
 
   // Parse command line arguments
@@ -335,6 +335,7 @@ int main(int argc, char *argv[]) {
 	std::cout << run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 5:
+    run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
 	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 6:

@@ -31,15 +31,13 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 
 	const uint innerRowA = threadIdx.x / (BK / 4);
 	const uint innerColA = threadIdx.x % (BK / 4);
-    const uint rowStrideA = (numThreadsBlocktile * 4) / BK;
   	const uint innerRowB = threadIdx.x / (BN / 4);
 	const uint innerColB = threadIdx.x % (BN / 4);
- 	const uint rowStrideB = numThreadsBlocktile / (BN / 4);
 
 	float threadResults[TM] = {0.0};
 
 	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		for (uint offset = 0; offset + innerRowA < BM && innerRowA + offset < BM; offset += rowStrideA) {
+		if (innerRowA < BM) {
 			float4 tmp = reinterpret_cast<const float4 *>(&A[innerRowA * K + innerColA * 4])[0];
 				
 			As[(innerColA * 4 + 0) * BM + innerRowA] = tmp.x;
@@ -47,11 +45,8 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 			As[(innerColA * 4 + 2) * BM + innerRowA] = tmp.z;
 			As[(innerColA * 4 + 3) * BM + innerRowA] = tmp.w;
 		}
-	
-		for (uint offset = 0; offset + innerRowB < BK && innerRowB + offset < BK; offset += rowStrideB) {
-			if (innerColB * 4 < BN) {
-				reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] = reinterpret_cast<float4 *>(&B[innerRowB * N + innerColB * 4])[0];
-			}
+		if (innerRowB < BK && innerColB * 4 < BN) {
+			reinterpret_cast<float4 *>(&Bs[innerRowB * BN + innerColB * 4])[0] = reinterpret_cast<float4 *>(&B[innerRowB * N + innerColB * 4])[0];
 		}
 		__syncthreads();
 
@@ -61,6 +56,7 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			float bTmp = Bs[dotIdx * BN + threadCol];
 
+			#pragma unroll
 			for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
 				threadResults[resIdxM] += As[dotIdx * BM + threadRow * TM + resIdxM] * bTmp;
 			}
@@ -69,8 +65,6 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
 	}
 
 	for (uint resIdx = 0; resIdx < TM; ++resIdx) {
-		if ((threadRow * TM + resIdx) < BM && threadCol * TN < BN) {
 			C[(threadRow * TM + resIdx) * N + threadCol] = threadResults[resIdx];
-		}
 	}
 }

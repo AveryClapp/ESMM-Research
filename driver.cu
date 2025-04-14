@@ -5,7 +5,7 @@
 #include "./kernels/smem_blocking.cu"
 #include "./kernels/vectorized_blocktiling.cu"
 #include "./kernels/warptiling.cu"
-#include "./kernels/warptiling_two.cu"
+#include "./kernels/1d_warptiling.cu"
 #include "./kernels/1D_vec.cu"
 #include "utils.cuh"
 #include <chrono>
@@ -111,24 +111,20 @@ bool run_1d_vec(int rows, int cols, int inners, float *d_A, float *d_B,
                          float *d_C, float *h_C, float *h_C_ref, int runs) {
   constexpr int BM = 64;
   constexpr int BN = 64;
-  constexpr int BK = 8;
-  constexpr int TM = 8;
+  constexpr int BK = 16;
+  constexpr int TM = 16;
   constexpr int TN = 1;
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   dim3 blockDim(BM * BN / (TM * TN));
-  SETUP
   for (int i = 0; i < runs; i++) {
-    START
     one_d_vec<BM, BN, BK, TM, TN>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-    END 
 	cudaDeviceSynchronize();
   }
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) {
 	printf("CUDA error: %s\n", cudaGetErrorString(error));
   }
-  RESULTS("1D Vectorized Blocktiling")
   cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
   return verifyResults(h_C, h_C_ref, rows * cols);
 }
@@ -150,22 +146,23 @@ bool run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
   return true;
 
 }
-bool run_warptiling_two(int rows, int cols, int inners, float *d_A, float *d_B,
+
+bool run_1d_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
   // Setup cuda timing
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
+
   const uint K10_NUM_THREADS = 128;
   const uint K10_BN = 64;
-  const uint K10_BM = 128;
+  const uint K10_BM = 64;
   const uint K10_BK = 8;
-  const uint K10_WN = 32;
-  const uint K10_WM = 64;
+  const uint K10_WN = 64;
+  const uint K10_WM = 16;
   const uint K10_WNITER = 2;
-  const uint K10_TN = 4;
-  const uint K10_TM = 4;
-
+  const uint K10_TN = 8;
+  const uint K10_TM = 1;
   dim3 blockDim(K10_NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
 
@@ -174,7 +171,7 @@ bool run_warptiling_two(int rows, int cols, int inners, float *d_A, float *d_B,
 
   for (int i = 0; i < runs; i++) {
     cudaEventRecord(start);
-    warptiling_two<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    one_warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
 	cudaEventRecord(stop);
     cudaDeviceSynchronize();
 	cudaEventSynchronize(stop);
@@ -215,6 +212,7 @@ bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   const uint K10_WNITER = 1;
   const uint K10_TN = 4;
   const uint K10_TM = 8;
+
   dim3 blockDim(K10_NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
 
@@ -271,10 +269,10 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 
 int main(int argc, char *argv[]) {
   // Setup
-  constexpr int rows = 512;
-  constexpr int cols = 512;
-  constexpr int inners = 512;
-  int kernel_choice = 5; // Default to warptiling
+  constexpr int rows = 1024;
+  constexpr int cols = 1024;
+  constexpr int inners = 1024;
+  int kernel_choice = 12; // Default to warptiling
   int runs = 1;          // Default number of runs
 
   // Parse command line arguments
@@ -354,8 +352,9 @@ int main(int argc, char *argv[]) {
     run_one_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
     run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
 	run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-    //run_warptiling_two(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
   default:

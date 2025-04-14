@@ -27,7 +27,7 @@
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	warptiling_two(int M, int N, int K, float *A, float *B, float *C) {
+	one_warptiling(int M, int N, int K, float *A, float *B, float *C) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 

@@ -9,12 +9,12 @@ BN_VALUES=(64 128 256)
 WM_VALUES=(32 64 128 256)
 WN_VALUES=(32 64 128 256)
 WNITER_VALUES=(1 2 4 8)
-TM_VALUES=(4 8 16 32)
+TM_VALUES=(1)
 TN_VALUES=(4 8 16 32)
 NUM_THREADS_VALUES=(128 256)
 
 RUNNER="./profiler.cu"
-OUTPUT="./results.txt"
+OUTPUT="./results_oned.txt"
 
 # Clear the output file
 echo "" > $OUTPUT

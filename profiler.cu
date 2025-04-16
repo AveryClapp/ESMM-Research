@@ -1,12 +1,4 @@
-#include "./kernels/1D_Blocktiling.cu"
-#include "./kernels/2D_Blocktiling.cu"
-#include "./kernels/basic.cu"
-#include "./kernels/gmem_coalesce.cu"
-#include "./kernels/smem_blocking.cu"
-#include "./kernels/vectorized_blocktiling.cu"
-#include "./kernels/warptiling.cu"
-#include "./kernels/warptiling_two.cu"
-#include "./kernels/1D_vec.cu"
+#include "./kernels/1d_warptiling.cu"
 #include "utils.cuh"
 #include <chrono>
 #include <cuda_runtime.h>
@@ -50,8 +42,8 @@ const uint K10_BK = 64;
 const uint K10_WN = 32;
 const uint K10_WM = 256;
 const uint K10_WNITER = 8;
-const uint K10_TN = 4;
-const uint K10_TM = 8;
+const uint K10_TN = 8;
+const uint K10_TM = 1;
 
 bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
@@ -69,7 +61,7 @@ bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
 
   for (int i = 0; i < runs; i++) {
     cudaEventRecord(start);
-    warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    one_warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
 	cudaEventRecord(stop);
     cudaDeviceSynchronize();
 	cudaEventSynchronize(stop);

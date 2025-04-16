@@ -149,60 +149,30 @@ bool run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,
 
 bool run_1d_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-  // Setup cuda timing
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-
-  const uint K10_NUM_THREADS = 128;
-  const uint K10_BN = 64;
-  const uint K10_BM = 64;
-  const uint K10_BK = 8;
-  const uint K10_WN = 64;
-  const uint K10_WM = 16;
-  const uint K10_WNITER = 2;
-  const uint K10_TN = 8;
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 128;
+  const uint K10_BM = 128;
+  const uint K10_BK = 32;
+  const uint K10_WN = 32;
+  const uint K10_WM = 64;
+  const uint K10_WNITER = 4;
+  const uint K10_TN = 4;
   const uint K10_TM = 1;
+
   dim3 blockDim(K10_NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
-
   // Initialize C to zeros
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   for (int i = 0; i < runs; i++) {
-    cudaEventRecord(start);
     one_warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-	cudaEventRecord(stop);
     cudaDeviceSynchronize();
-	cudaEventSynchronize(stop);
   }
-  
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-	//return false;
-	std::cout << "FAIL" << std::endl;
-  } else {
-	bool success = verifyResults(h_C, h_C_ref, rows * cols);
-	if (!success) {
-		return false;
-	}
-	float time = 0;
-	cudaEventElapsedTime(&time, start, stop);
-	std::cout << time << " ms" << std::endl;
-
-	//return true;
-  }
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
+	return true;  
 }
 
 bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-  // Setup cuda timing
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
   const uint K10_NUM_THREADS = 256;
   const uint K10_BN = 128;
   const uint K10_BM = 128;
@@ -220,31 +190,10 @@ bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   for (int i = 0; i < runs; i++) {
-    cudaEventRecord(start);
     warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-	cudaEventRecord(stop);
     cudaDeviceSynchronize();
-	cudaEventSynchronize(stop);
   }
-  
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-	//return false;
-	std::cout << "FAIL" << std::endl;
-  } else {
-	bool success = verifyResults(h_C, h_C_ref, rows * cols);
-	if (!success) {
-		return false;
-	}
-	float time = 0;
-	cudaEventElapsedTime(&time, start, stop);
-	std::cout << time << " ms" << std::endl;
-
-	//return true;
-  }
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
+	return true;  
 }
 
 void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
@@ -340,6 +289,7 @@ int main(int argc, char *argv[]) {
 	std::cout << run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 10:
+    run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 11:

@@ -9,7 +9,6 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
-const int WARPSIZE = 32;
 
 
 

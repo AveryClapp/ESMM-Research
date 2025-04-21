@@ -6,6 +6,8 @@
 #include "./kernels/vectorized_blocktiling.cu"
 #include "./kernels/warptiling.cu"
 #include "./kernels/1d_warptiling.cu"
+#include "./kernels/1d_warptiling_tm.cu"
+#include "./kernels/1d_warptiling_tn.cu"
 #include "./kernels/1D_vec.cu"
 #include "utils.cuh"
 #include <chrono>
@@ -16,6 +18,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* 
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 128;
+  const uint K10_BM = 128;
+  const uint K10_BK = 32;
+  const uint K10_WN = 32;
+  const uint K10_WM = 64;
+  const uint K10_WNITER = 4;
+  const uint K10_TN = 4;
+  const uint K10_TM = 1;
+*/
 #define cudaCheckError(ans)                                                    \
   {                                                                            \
     cudaAssert((ans), __FILE__, __LINE__);                                     \
@@ -168,8 +181,62 @@ bool run_1d_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
     one_warptiling<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
     cudaDeviceSynchronize();
   }
+  return true;  
+}
+
+bool run_1d_warptiling_tn(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 128;
+  const uint K10_BM = 128;
+  const uint K10_BK = 16;
+  const uint K10_WN = 64;
+  const uint K10_WM = 32;
+  const uint K10_WNITER = 4;
+  const uint K10_TN = 8;
+  const uint K10_TM = 1;
+
+  dim3 blockDim(K10_NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+  // Initialize C to zeros
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  for (int i = 0; i < runs; i++) {
+    one_warptiling_tn<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    cudaDeviceSynchronize();
+  }
 	return true;  
 }
+
+
+/*
+bool run_1d_warptiling_tm(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 128;
+  const uint K10_BM = 128;
+  const uint K10_BK = 32;
+  const uint K10_WN = 32;
+  const uint K10_WM = 64;
+  const uint K10_WNITER = 4;
+  const uint K10_TN = 4;
+  const uint K10_TM = 1;
+
+  dim3 blockDim(K10_NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+  // Initialize C to zeros
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  for (int i = 0; i < runs; i++) {
+    one_warptiling_tm<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    cudaDeviceSynchronize();
+  }
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  return verifyResults(h_C,h_C_ref,rows*cols);
+
+	//return true;  
+}
+*/
 
 bool run_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
@@ -221,7 +288,7 @@ int main(int argc, char *argv[]) {
   constexpr int rows = 1024;
   constexpr int cols = 1024;
   constexpr int inners = 1024;
-  int kernel_choice = 12; // Default to warptiling
+  int kernel_choice = 10; // Default to warptiling
   int runs = 1;          // Default number of runs
 
   // Parse command line arguments
@@ -290,7 +357,10 @@ int main(int argc, char *argv[]) {
     break;
   case 10:
     run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_1d_warptiling_tn(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    //run_1d_warptiling_tm(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
   case 11:
 	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
@@ -303,8 +373,9 @@ int main(int argc, char *argv[]) {
     run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
 	run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
 	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-    run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_1d_warptiling_tn(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
   default:

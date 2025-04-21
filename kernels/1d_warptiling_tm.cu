@@ -9,8 +9,46 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
-const int WARPSIZE = 32;
 
+
+__device__ inline void multiply_dense(int wSubRowIdx, int wSubColIdx,  
+									int WNITER, float *regM, float regN_val, 
+											float* threadResults) {
+	const int regMBase = wSubRowIdx * 8;
+	threadResults[(regMBase + 0) * WNITER + wSubColIdx] += regM[regMBase + 0] * regN_val; 
+	threadResults[(regMBase + 1) * WNITER + wSubColIdx] += regM[regMBase + 1] * regN_val; 
+	threadResults[(regMBase + 2) * WNITER + wSubColIdx] += regM[regMBase + 2] * regN_val; 
+	threadResults[(regMBase + 3) * WNITER + wSubColIdx] += regM[regMBase + 3] * regN_val; 
+	threadResults[(regMBase + 4) * WNITER + wSubColIdx] += regM[regMBase + 4] * regN_val; 
+	threadResults[(regMBase + 5) * WNITER + wSubColIdx] += regM[regMBase + 5] * regN_val; 
+	threadResults[(regMBase + 6) * WNITER + wSubColIdx] += regM[regMBase + 6] * regN_val; 
+	threadResults[(regMBase + 7) * WNITER + wSubColIdx] += regM[regMBase + 7] * regN_val; 
+}
+
+__device__ inline void multiply_half(int wSubRowIdx, int wSubColIdx,  
+									int WNITER, float *regM, float regN_val, 
+											float* threadResults) {
+	const int regMBase = wSubRowIdx * 8;
+	threadResults[(regMBase + 0) * WNITER + wSubColIdx] += regM[regMBase + 0] * regN_val; 
+	threadResults[(regMBase + 1) * WNITER + wSubColIdx] += regM[regMBase + 1] * regN_val; 
+	threadResults[(regMBase + 2) * WNITER + wSubColIdx] += regM[regMBase + 2] * regN_val; 
+	threadResults[(regMBase + 3) * WNITER + wSubColIdx] += regM[regMBase + 3] * regN_val; 
+}
+
+__device__ inline void multiply_quarter(int wSubRowIdx, int wSubColIdx,  
+									int WNITER, float *regM, float regN_val, 
+											float* threadResults) {
+	const int regMBase = wSubRowIdx * 8;
+	threadResults[(regMBase + 0) * WNITER + wSubColIdx] += regM[regMBase + 0] * regN_val; 
+	threadResults[(regMBase + 1) * WNITER + wSubColIdx] += regM[regMBase + 1] * regN_val; 
+}
+
+__device__ inline void multiply_eighth(int wSubRowIdx, int wSubColIdx,  
+									int WNITER, float *regM, float regN_val, 
+											float* threadResults) {
+	const int regMBase = wSubRowIdx * 8;
+	threadResults[(regMBase + 0) * WNITER + wSubColIdx] += regM[regMBase + 0] * regN_val; 
+}
 
 
 /*
@@ -86,15 +124,15 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				}
 			}
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				regN[wSubColIdx * TN + i] =
+				regN[wSubColIdx * TN] =
 					Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN +
-						threadColInWarp * TN + i];
+						threadColInWarp * TN];
 			}
 			// Computation block
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					int base = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) + (wSubColIdx * TN)
-					multiply_dense(base, regM, regN[wSubRowIdx * TN], threadResults, wSubRowIdx * TM);
+					multiply_dense(wSubRowIdx, wSubColIdx, WNITER, 
+							regM, regN[wSubColIdx], threadResults);
 				}
 			}
 		}
@@ -122,26 +160,3 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		}	
 	}		
 }
-
-__device__ inline void multiply_dense(int baseIdx, float *regM, float regN_val
-										  float* threadResults, int regMBase) {
-	threadResults[baseIdx + 0] = regM[regMBase + 0] * regN_val; 
-	threadResults[baseIdx + 1] = regM[regMBase + 1] * regN_val; 
-	threadResults[baseIdx + 2] = regM[regMBase + 2] * regN_val; 
-	threadResults[baseIdx + 3] = regM[regMBase + 3] * regN_val; 
-	threadResults[baseIdx + 4] = regM[regMBase + 4] * regN_val; 
-	threadResults[baseIdx + 5] = regM[regMBase + 5] * regN_val; 
-	threadResults[baseIdx + 6] = regM[regMBase + 6] * regN_val; 
-	threadResults[baseIdx + 7] = regM[regMBase + 7] * regN_val; 
-
-}
-/* INNER LOOP:
-   for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
-   	for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
-   		threadResults[(wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
-   			(wSubColIdx * TN) + resIdxN] +=
-   		regM[wSubRowIdx * TM + resIdxM] *
-   		regN[wSubColIdx * TN + resIdxN];
-   	}
-   }
-*/

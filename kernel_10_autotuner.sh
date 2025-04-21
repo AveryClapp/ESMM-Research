@@ -9,12 +9,12 @@ BN_VALUES=(64 128 256)
 WM_VALUES=(32 64 128 256)
 WN_VALUES=(32 64 128 256)
 WNITER_VALUES=(1 2 4 8)
-TM_VALUES=(1)
-TN_VALUES=(8)
+TM_VALUES=(8)
+TN_VALUES=(1)
 NUM_THREADS_VALUES=(128 256)
 
 RUNNER="./profiler.cu"
-OUTPUT="./results_oned_tn8.txt"
+OUTPUT="./results_oned_tm8.txt"
 
 # Clear the output file
 echo "" > $OUTPUT

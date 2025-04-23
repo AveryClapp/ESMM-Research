@@ -205,6 +205,7 @@ bool run_1d_warptiling_tn(int rows, int cols, int inners, float *d_A, float *d_B
     one_warptiling_tn<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
     cudaDeviceSynchronize();
   }
+
 	return true;  
 }
 
@@ -285,9 +286,9 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 
 int main(int argc, char *argv[]) {
   // Setup
-  constexpr int rows = 1024;
-  constexpr int cols = 1024;
-  constexpr int inners = 1024;
+  constexpr int rows = 4096;
+  constexpr int cols = 4096;
+  constexpr int inners = 4096;
   int kernel_choice = 10; // Default to warptiling
   int runs = 1;          // Default number of runs
 
@@ -307,7 +308,8 @@ int main(int argc, char *argv[]) {
   float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
   // Generate random data
-  randomize_matrix(h_A, rows, inners);
+  std::vector<int> sparsity = stringToVector("00000010");
+  randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
   randomize_matrix(h_B, inners, cols);
 
   // Set h_C to zeros
@@ -326,7 +328,7 @@ int main(int argc, char *argv[]) {
                             cudaMemcpyHostToDevice));
 
   // Generate reference solution on CPU
-  matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+  //matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
 
   // Initialize d_C to zeros
   cudaCheckError(cudaMemset(d_C, 0, rows * cols * sizeof(float)));

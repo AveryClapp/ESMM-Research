@@ -10,6 +10,24 @@
 #include <cuda_runtime.h>
 
 
+__device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
+								int WNITER, float regM_val, float* regN,
+										float* threadResults) {
+	const int regNBase = wSubColIdx * 8;
+	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
+	/* Build a switch table on the 8-bit sparsity pattern and unroll */
+	uint8_t sparsity = 1;
+	/* Initial thoughts: 
+	   better to have WNITER loop here as well?*/
+	switch (sparsity) {
+		case 0:
+			break;
+		case 1:
+		/* ... */
+		case 255:
+
+	}
+}
 /* TODO: Does passing regN as a ptr speed it up at all? */
 __device__ inline void multiply_dense(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
@@ -122,21 +140,22 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-					regM[wSubRowIdx * TM] =
-						As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM +
-												threadRowInWarp * TM];
+				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+					wSubRowIdx * WSUBM + threadRowInWarp * TM];
 			}
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 				for (uint i = 0; i < TN; ++i) {
 					regN[wSubColIdx * TN + i] =
-						Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN +
-							threadColInWarp * TN + i];
+						Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx *
+							WSUBN + threadColInWarp * TN + i];
 				}
 			}
 				// execute warptile matmul
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+				if (regM[wSubRowIdx] == 0)
+					continue;
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					multiply_quarter(wSubRowIdx, wSubColIdx, WNITER,
+					multiply_half(wSubRowIdx, wSubColIdx, WNITER,
 						regM[wSubRowIdx], regN, threadResults);
 				}
 			}

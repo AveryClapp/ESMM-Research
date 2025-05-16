@@ -1,5 +1,6 @@
 # Prerequisites
 *.d
+*.ncu-rep
 
 # Compiled Object files
 *.slo

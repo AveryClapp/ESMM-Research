@@ -1,4 +1,4 @@
-# Emergent Sparsity Matrix Multiplication CUDA Programming
+# ESMM  CUDA Programming
 View current testing results [here](https://docs.google.com/spreadsheets/d/1l7kVnpowxioqy-BX4UVK34Vqc7DbwsiFNjKI8jKklxw/edit?usp=sharing)
 
 TODOs: 

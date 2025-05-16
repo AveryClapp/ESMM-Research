@@ -3,9 +3,9 @@
 #ifndef UTILS_CUH
 #define UTILS_CUH
 #include <cuda_runtime.h>
+#include <vector>
 #include <iostream>
 #include <string>
-#include <vector>
 #define CEIL_DIV(M, N) (((M) + (N) - 1) / (N))
 #define PATTERN_LENGTH 8
 
@@ -19,7 +19,7 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 }
 
 void randomize_matrix_with_pattern(float *mat, int M, int N,
-                                   std::vector<int> pattern) {
+                  std::vector<int> pattern) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
       int pattern_idx = (i * N + j) % PATTERN_LENGTH;

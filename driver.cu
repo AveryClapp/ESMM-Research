@@ -7,7 +7,7 @@
 #include "./kernels/warptiling.cu"
 #include "./kernels/1d_warptiling.cu"
 #include "./kernels/1d_warptiling_tm.cu"
-#include "./kernels/1d_warptiling_tn.cu"
+#include "./esmm.cu"
 #include "./kernels/1D_vec.cu"
 #include "utils.cuh"
 #include <chrono>
@@ -308,7 +308,7 @@ int main(int argc, char *argv[]) {
   float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
   // Generate random data
-  std::vector<int> sparsity = stringToVector("00000010");
+  std::vector<int> sparsity = stringToVector("10101010");
   randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
   randomize_matrix(h_B, inners, cols);
 
@@ -360,7 +360,6 @@ int main(int argc, char *argv[]) {
   case 10:
     run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_1d_warptiling_tn(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-    //run_1d_warptiling_tm(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;

@@ -100,8 +100,12 @@ for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 ```
 In both of these, the indexing works like this, find the row or column in the blocktile, find the warptile and find the column within the warptile, find where the thread should be in the warp and then start loading elements (1 for TM, 8 for TN). So now you have the 1x8 (TM x TN) segment that each thread does that completes the WSUBM x WSUBN matrix that is combined to complete the WM x WN matrix that combines to complete the blocktiling matrix which is done across the whole A and B matrices to compute the result.
 
+![](./images/tmxtx.png)
+
+
 # Inner Loop
-Basic matrix multiplication that uses the register files and the thread results array to store elements to be written back.
+The inner loop goes over all WNITER tiles and runs a computation that accumulates results from the regN array that holds WNITER \* TN elements. For each grouping of TN elements it multiples against the corresponding element of A and accumulates values in the thread results array that will eventually write results to C.
+![](./images/Innerloop.png)
 
 # Writing Results Back
 At a glance, this looks complicated because there is a lot going on:

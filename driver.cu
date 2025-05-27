@@ -1,14 +1,15 @@
-#include "./kernels/1D_Blocktiling.cu"
-#include "./kernels/2D_Blocktiling.cu"
-#include "./kernels/basic.cu"
-#include "./kernels/gmem_coalesce.cu"
-#include "./kernels/smem_blocking.cu"
-#include "./kernels/vectorized_blocktiling.cu"
-#include "./kernels/warptiling.cu"
-#include "./kernels/1d_warptiling.cu"
-#include "./kernels/1d_warptiling_tm.cu"
+#include "./old_kernels/1D_Blocktiling.cu"
+#include "./old_kernels/2D_Blocktiling.cu"
+#include "./old_kernels/basic.cu"
+#include "./old_kernels/gmem_coalesce.cu"
+#include "./old_kernels/smem_blocking.cu"
+#include "./old_kernels/vectorized_blocktiling.cu"
+#include "./old_kernels/warptiling.cu"
+#include "./old_kernels/1d_warptiling.cu"
+#include "./old_kernels/1d_warptiling_tm.cu"
 #include "./esmm.cu"
-#include "./kernels/1D_vec.cu"
+#include "./esmm_warpskipping.cu"
+#include "./old_kernels/1D_vec.cu"
 #include "utils.cuh"
 #include <chrono>
 #include <cublas_v2.h>
@@ -184,7 +185,7 @@ bool run_1d_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
   return true;  
 }
 
-bool run_1d_warptiling_tn(int rows, int cols, int inners, float *d_A, float *d_B,
+bool run_esmm(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
   const uint K10_NUM_THREADS = 256;
   const uint K10_BN = 128;
@@ -202,13 +203,37 @@ bool run_1d_warptiling_tn(int rows, int cols, int inners, float *d_A, float *d_B
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   for (int i = 0; i < runs; i++) {
-    one_warptiling_tn<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    esmm<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
     cudaDeviceSynchronize();
   }
 
 	return true;  
 }
 
+bool run_esmm_warpskipping(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 128;
+  const uint K10_BM = 128;
+  const uint K10_BK = 16;
+  const uint K10_WN = 64;
+  const uint K10_WM = 64;
+  const uint K10_WNITER = 8;
+  const uint K10_TN = 8;
+  const uint K10_TM = 1;
+
+  dim3 blockDim(K10_NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+  // Initialize C to zeros
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  for (int i = 0; i < runs; i++) {
+    esmm_warpskipping<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    cudaDeviceSynchronize();
+  }
+
+	return true;  
+}
 
 /*
 bool run_1d_warptiling_tm(int rows, int cols, int inners, float *d_A, float *d_B,
@@ -359,7 +384,8 @@ int main(int argc, char *argv[]) {
     break;
   case 10:
     run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-    run_1d_warptiling_tn(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_esmm(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_esmm_warpskipping(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;
@@ -375,7 +401,8 @@ int main(int argc, char *argv[]) {
 	run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
 	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-    run_1d_warptiling_tn(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_esmm(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+    run_esmm_warpskipping(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
     break;

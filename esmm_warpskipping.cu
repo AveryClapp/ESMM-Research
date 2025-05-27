@@ -93,7 +93,7 @@ __device__ inline void multiply_eighth(int wSubRowIdx, int wSubColIdx,
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	esmm(int M, int N, int K, float *A, float *B, float *C) {
+	warp_skipping(int M, int N, int K, float *A, float *B, float *C) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
@@ -106,7 +106,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	constexpr uint WSUBN = WN / WNITER; 
 
 	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
+	/* This ends up being 0 every time so each thread starts at col 0 */
 	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
+	/* This ends up being threadIdxInWarp so you assign rows sequentially. */
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 
 	__shared__ float As[BN * BK];
@@ -144,24 +146,28 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		}
 		__syncthreads();
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
-					wSubRowIdx * WSUBM + threadRowInWarp * TM];
-			}
-			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				for (uint i = 0; i < TN; ++i) {
-					regN[wSubColIdx * TN + i] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + i];
-				}
-			}
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				//if (regM[wSubRowIdx] == 0)
-				//	continue;
-				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					/* switch_table; */
-					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-						regM[wSubRowIdx], regN, threadResults);
-				}
+			/* Threads need to share the one A element now. */
+			for (uint inner = 0; inner < WSUBM; ++inner) {
+					/* Get the A element on the BKth column and inner row */
+					for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+						regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+							wSubRowIdx * WSUBM + inner * TM];
+					}
+					for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+						for (uint i = 0; i < TN; ++i) {
+							regN[wSubColIdx * TN + i] = Bs[(dotIdx * BN) + warpCol * 
+								WN + wSubColIdx * WSUBN + threadColInWarp * TN + i];
+						}
+					}
+					for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+						if (regM[wSubRowIdx] == 0)
+							continue;
+						for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+							/* switch_table; */
+							multiply_half(wSubRowIdx, wSubColIdx, WNITER,
+								regM[wSubRowIdx], regN, threadResults);
+						}
+					}
 			}
 		}
 		A += BK;     

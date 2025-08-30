@@ -34,7 +34,7 @@ __device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
 
 }
 */
-
+/*
 __device__ inline void multiply_dense(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {
@@ -79,6 +79,7 @@ __device__ inline void multiply_eighth(int wSubRowIdx, int wSubColIdx,
 	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
 }
 
+*/
 /*
  * @tparam BM The threadblock size for M dimension SMEM caching.
  * @tparam BN The threadblock size for N dimension SMEM caching.
@@ -159,8 +160,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				//	continue;
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					/* switch_table; */
-					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-						regM[wSubRowIdx], regN, threadResults);
+	//				multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
+	//					regM[wSubRowIdx], regN, threadResults);
 				}
 			}
 		}

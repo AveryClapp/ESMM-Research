@@ -231,6 +231,8 @@ bool run_esmm_warpskipping(int rows, int cols, int inners, float *d_A, float *d_
     esmm_warpskipping<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
     cudaDeviceSynchronize();
   }
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  return verifyResults(h_C,h_C_ref,rows*cols);
 
 	return true;  
 }
@@ -311,10 +313,10 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 
 int main(int argc, char *argv[]) {
   // Setup
-  constexpr int rows = 4096;
-  constexpr int cols = 4096;
-  constexpr int inners = 4096;
-  int kernel_choice = 10; // Default to warptiling
+  constexpr int rows = 1024;
+  constexpr int cols = 1024;
+  constexpr int inners = 1024;
+  int kernel_choice = 6; // Default to warptiling
   int runs = 1;          // Default number of runs
 
   // Parse command line arguments
@@ -353,7 +355,7 @@ int main(int argc, char *argv[]) {
                             cudaMemcpyHostToDevice));
 
   // Generate reference solution on CPU
-  //matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+  matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
 
   // Initialize d_C to zeros
   cudaCheckError(cudaMemset(d_C, 0, rows * cols * sizeof(float)));
@@ -380,7 +382,7 @@ int main(int argc, char *argv[]) {
 	run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
     break;
   case 6:
-	std::cout << run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
+	std::cout << run_esmm_warpskipping(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs) << std::endl;
     break;
   case 10:
     run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);

@@ -9,6 +9,34 @@
 #define CEIL_DIV(M, N) (((M) + (N) - 1) / (N))
 #define PATTERN_LENGTH 8
 
+#define cudaCheckError(ans)                                                    \
+  {                                                                            \
+    cudaAssert((ans), __FILE__, __LINE__);                                     \
+  }
+inline void cudaAssert(cudaError_t code, const char *file, int line) {
+  if (code != cudaSuccess) {
+    fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file,
+            line);
+    exit(code);
+  }
+}
+
+#define SETUP                                                                  \
+  auto start = std::chrono::high_resolution_clock::now();                      \
+  auto end = std::chrono::high_resolution_clock::now();                        \
+  double total_time = 0.0f;
+#define START start = std::chrono::high_resolution_clock::now();
+#define END                                                                    \
+  end = std::chrono::high_resolution_clock::now();                             \
+  total_time +=                                                                \
+      std::chrono::duration_cast<std::chrono::microseconds>(end - start)       \
+          .count();
+#define RESULTS(kernel)                                                        \
+  std::cout << "Average Speed of Kernel " << kernel << " (" << runs            \
+            << " runs): " << std::fixed << std::setprecision(4)                \
+            << (total_time / runs) / 1000.0f << " ms" << std::endl;
+
+
 void cudaCheck(cudaError_t error, const char *file, int line) {
   if (error != cudaSuccess) {
     printf("[CUDA ERROR] at file %s(line %d):\n%s\n", file, line,

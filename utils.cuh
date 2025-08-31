@@ -9,6 +9,9 @@
 #define CEIL_DIV(M, N) (((M) + (N) - 1) / (N))
 #define PATTERN_LENGTH 8
 
+using std::cout;
+using std::endl;
+
 #define cudaCheckError(ans)                                                    \
   {                                                                            \
     cudaAssert((ans), __FILE__, __LINE__);                                     \
@@ -44,6 +47,33 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
     exit(EXIT_FAILURE);
   }
   return;
+}
+
+void print_usage(const char* program_name) {
+    cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
+    cout << "  kernel_choice: " << endl;
+    cout << "    Single kernel: 1-12 (run specific kernel)" << endl;
+    cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
+    cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
+    cout << "    All: \"all\" (run all kernels 1-12)" << endl;
+    cout << "  runs: number of runs per kernel (default: 1)" << endl;
+    cout << "  options:" << endl;
+    cout << "    --verbose or -v: print detailed results" << endl;
+    cout << "    --help or -h: show this help" << endl;
+    cout << endl;
+    cout << "Available kernels:" << endl;
+    cout << "  1:  Naive Implementation" << endl;
+    cout << "  2:  Global Memory Coalescing" << endl;
+    cout << "  3:  Shared Memory Blocks" << endl;
+    cout << "  4:  One Dimensional Blocktiling" << endl;
+    cout << "  5:  Two Dimensional Blocktiling" << endl;
+    cout << "  6:  Vectorized Memory Accessing" << endl;
+    cout << "  7:  1D Vectorized Approach" << endl;
+    cout << "  8:  Basic Warptiling" << endl;
+    cout << "  9:  1D Warptiling" << endl;
+    cout << "  10: Emergent Sparsity Matrix Multiplication (ESMM)" << endl;
+    cout << "  11: ESMM Warpskipping" << endl;
+    cout << "  12: cuBLAS" << endl;
 }
 
 void randomize_matrix_with_pattern(float *mat, int M, int N,

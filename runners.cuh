@@ -79,7 +79,7 @@ bool run_one_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
 }
 
 bool run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
-                         float *d_C, float *h_C, float*  h_C_ref, int runs) {
+                         float *d_C, int runs) {
 
   constexpr int BM = 128;
   constexpr int BN = 128;
@@ -94,28 +94,6 @@ bool run_two_blocktiling(int rows, int cols, int inners, float *d_A, float *d_B,
     cudaDeviceSynchronize();
   }
   return true;
-}
-
-bool run_1d_vec(int rows, int cols, int inners, float *d_A, float *d_B,
-                         float *d_C, float *h_C, float *h_C_ref, int runs) {
-  constexpr int BM = 64;
-  constexpr int BN = 64;
-  constexpr int BK = 16;
-  constexpr int TM = 16;
-  constexpr int TN = 1;
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  dim3 blockDim(BM * BN / (TM * TN));
-  for (int i = 0; i < runs; i++) {
-    one_d_vec<BM, BN, BK, TM, TN>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
-	cudaDeviceSynchronize();
-  }
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-	printf("CUDA error: %s\n", cudaGetErrorString(error));
-  }
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  return verifyResults(h_C, h_C_ref, rows * cols);
 }
 
 bool run_vectorized(int rows, int cols, int inners, float *d_A, float *d_B,

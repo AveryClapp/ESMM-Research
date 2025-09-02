@@ -1,6 +1,6 @@
 #pragma once
 
-/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
+/* Experimental improvemnt to esmm.cu, where we leverage double buffering for a more efficient and pipelined kernel */
 
 #include <algorithm>
 #include <cassert>
@@ -10,32 +10,6 @@
 #include <cuda_runtime.h>
 #include "utils.cuh"
 
-//#include <unrolled_kernels.cuh>
-
-/* How should this work?
-   We calculate the pattern in here?
-       Slow, this is not the solution since we will be shuffling
-	   sparsity anyways beforehand
-   We know sparsity beforehand and just run the switch statement 
- 	   How would this work?
-*/
-/*
-__device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-		
-	switch (sparsity) {
-		case 0:
-			break;
-		case 1:
-		case 255:
-
-	}
-
-}
-*/
 
 /*
  * @tparam BM The threadblock size for M dimension SMEM caching.

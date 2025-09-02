@@ -1,6 +1,8 @@
 #pragma once
 
-/* Basic CUDA Kernel with no optimizations */
+/**
+* Basic GPU implementation of matrix multiplication
+*/
 
 #include <cuda_runtime.h>
 

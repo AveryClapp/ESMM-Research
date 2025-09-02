@@ -1,6 +1,6 @@
 #pragma once
 
-/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
+/* Experimental imporvement to skip warps entirely given a precomputed sparsity */
 
 #include <algorithm>
 #include <cassert>
@@ -8,76 +8,8 @@
 #include <cstdlib>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-//#include <unrolled_kernels.cuh>
+#include "utils.cuh"
 
-/* How should this work?
-   We calculate the pattern in here?
-       Slow, this is not the solution since we will be shuffling
-	   sparsity anyways beforehand
-   We know sparsity beforehand and just run the switch statement 
- 	   How would this work?
-*/
-/*
-__device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-		
-	switch (sparsity) {
-		case 0:
-			break;
-		case 1:
-		case 255:
-
-	}
-
-}
-*/
-
-__device__ inline void multiply_dense(int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
-	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
-	threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
-	threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
-	threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
-	threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];
-	threadResults[threadResBase + 6] += regM_val * regN[regNBase + 6];
-	threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
-}
-
-__device__ inline void multiply_half(int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
-	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
-	threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
-	threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
-}
-
-
-__device__ inline void multiply_quarter(int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
-	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
-}
-
-__device__ inline void multiply_eighth(int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
-}
 
 /*
  * @tparam BM The threadblock size for M dimension SMEM caching.

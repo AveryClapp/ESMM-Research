@@ -1,6 +1,6 @@
 #pragma once
 
-/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
+/* 1D dimensional (TM=1) version of Kernel #10, Warptiling (break blocks down even further by controlling warps) */
 
 #include <algorithm>
 #include <cassert>
@@ -91,7 +91,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 							threadColInWarp * TN + i];
 				}
 			}
-				// execute warptile matmul
+			// execute warptile matmul
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {

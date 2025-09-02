@@ -63,8 +63,9 @@ The codebase incorporates insights from cutting-edge research:
 
 
 ## TODOs: 
+- [ ] [Cutlass](https://github.com/NVIDIA/cutlass) inspired double-buffering
 - [ ] Revisit Inner Dimension Constraint Results
 - [ ] Take a look at the [PIT Paper](https://arxiv.org/pdf/2301.10936)
-- [ ] Tuple (Offset, Value) for A-Sparsity
 - [ ] Generate 256 kernels
+- [ ] Tuple (Offset, Value) for A-Sparsity
 - [ ] Build Switch Table

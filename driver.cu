@@ -111,7 +111,10 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
     case 11: // Experimental warpskipping approach to ESMM
         //res = run_esmm_warpskipping(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         break;
-    case 12: // cuBlas
+    case 12: // Experimental double buffered approach to ESMM
+        res = run_esmm_buffered(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        break;
+    case 13: // cuBlas
         run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
         res = true; // Assume cuBLAS always succeeds
         break;

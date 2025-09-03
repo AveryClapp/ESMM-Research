@@ -73,7 +73,8 @@ void print_usage(const char* program_name) {
     cout << "  9:  1D Warptiling" << endl;
     cout << "  10: Emergent Sparsity Matrix Multiplication (ESMM)" << endl;
     cout << "  11: ESMM Warpskipping" << endl;
-    cout << "  12: cuBLAS" << endl;
+    cout << "  12: ESMM Double Buffered" << endl;
+    cout << "  13: cuBLAS" << endl;
 }
 
 void randomize_matrix_with_pattern(float *mat, int M, int N,

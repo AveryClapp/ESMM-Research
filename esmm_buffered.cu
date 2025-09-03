@@ -228,3 +228,4 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
       }
     }
   }
+}

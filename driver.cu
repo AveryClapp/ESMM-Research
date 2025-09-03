@@ -30,7 +30,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
     if (dash_pos != std::string::npos) {
         int start = std::stoi(input.substr(0, dash_pos));
         int end = std::stoi(input.substr(dash_pos + 1));
-        for (int i = start; i <= end && i <= 12; i++) {
+        for (int i = start; i <= end && i <= 13; i++) {
             kernels.push_back(i);
         }
         return kernels;
@@ -60,7 +60,8 @@ const char* get_kernel_name(int kernel_choice) {
         case 9: return "1D Warptiling";
         case 10: return "Emergent Sparsity Matrix Multiplication (ESMM)";
         case 11: return "ESMM Warpskipping";
-        case 12: return "cuBLAS";
+        case 12: return "ESMM Buffered";
+        case 13: return "cuBLAS";
         default: return "Unknown Kernel";
     }
 }

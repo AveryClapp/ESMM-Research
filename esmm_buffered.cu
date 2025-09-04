@@ -138,29 +138,27 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
   const uint innerColB = (threadIdx.x % (NUM_THREADS / 2)) % (BN / 4);
   constexpr uint rowStrideB = (NUM_THREADS / 2) / (BN / 4);
 
-  // allocate thread-local cache for results in registerfile
   float threadResults[WMITER * TM * WNITER * TN] = {0.0};
-  // we cache into registers on the warptile level
   float regM[WMITER * TM] = {0.0};
   float regN[WNITER * TN] = {0.0};
 
   if (doubleBufferIdx == 0) {
-    // load first (B0)
+    // Load block 0
     db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
       N, K, A, B, As, Bs, innerRowA, innerColA, innerRowB, innerColB);
+    __syncthreads();
   }
-  __syncthreads();
 
   // outer-most loop over block tiles
   for (uint bkIdx = 0; bkIdx < K; bkIdx += 2 * BK) {
     if (doubleBufferIdx == 0) {
-      // process current (B0)
+      // Process block 0
       db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM,
         TN>(regM, regN, threadResults, As, Bs, warpRow,
             warpCol, threadRowInWarp, threadColInWarp);
       __syncthreads();
 
-      // process current+1 (B1)
+      // Process block 1 (loaded by other side)
       if (bkIdx + BK < K) {
         db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
           TM, TN>(regM, regN, threadResults, As + (BM * BK),
@@ -169,14 +167,14 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
       }
       __syncthreads();
 
-      // load current + 2 (B0)
+      // Load block 2 into the first half of As & Bs (this will be block 0 next iteration)
       if (bkIdx + 2 * BK < K) {
         db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
           N, K, A + 2 * BK, B + 2 * BK * N, As, Bs, innerRowA, innerColA,
           innerRowB, innerColB);
       }
     } else {
-      // load current + 1 (B1)
+      // Load block 1 into the second half of As & Bs
       if (bkIdx + BK < K) {
         db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
           N, K, A + BK, B + BK * N, As + (BM * BK), Bs + (BK * BN), innerRowA,
@@ -184,13 +182,13 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
       }
       __syncthreads();
 
-      // process current (B0)
+      // Process the rest of block 0
       db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM,
         TN>(regM, regN, threadResults, As, Bs, warpRow,
             warpCol, threadRowInWarp, threadColInWarp);
       __syncthreads();
 
-      // process current+1 (B1)
+      // Process the rest of block 1
       if (bkIdx + BK < K) {
         db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
           TM, TN>(regM, regN, threadResults, As + (BM * BK),
@@ -199,8 +197,8 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
       }
     }
 
-    A += 2 * BK;     // move BK columns to right
-    B += 2 * BK * N; // move BK rows down
+    A += 2 * BK;
+    B += 2 * BK * N;
     __syncthreads();
   }
 

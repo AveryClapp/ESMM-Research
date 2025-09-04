@@ -216,23 +216,23 @@ bool run_esmm_warpskipping(int rows, int cols, int inners, float *d_A, float *d_
 
 bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint K10_NUM_THREADS = 256;
-  const uint K10_BN = 128;
-  const uint K10_BM = 128;
-  const uint K10_BK = 16;
-  const uint K10_WN = 64;
-  const uint K10_WM = 32;
-  const uint K10_WNITER = 4;
-  const uint K10_TN = 8;
-  const uint K10_TM = 1;
+  const uint NUM_THREADS = 256;
+  const uint BN = 256;
+  const uint BM = 128;
+  const uint BK = 16;
+  const uint WN = 32;
+  const uint WM = 128;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 8;
 
-  dim3 blockDim(K10_NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   // Initialize C to zeros
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   for (int i = 0; i < runs; i++) {
-    esmm_buffered<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS>
+    esmm_buffered<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
     cudaDeviceSynchronize();
   }

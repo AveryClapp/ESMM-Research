@@ -8,6 +8,7 @@
 #include "utils.cuh"
 
 /* Experimental improvemnt to esmm.cu, where we leverage double buffering for a more efficient and pipelined kernel */
+
 /**
  * The motivation behind this kernel is that in our previous version, all threads are either loading from GMEM or computing.
  * This doesn't seem like such a bad thing, except for the fact that memory units are idle during the compute phase and the 
@@ -31,69 +32,61 @@
  */
 
 namespace db {
-  template <const int BM, const int BN, const int BK, const int rowStrideA,
-    const int rowStrideB>
-  __device__ void loadFromGmem(const int N, const int K, float *A, float *B,
-                               float *As, float *Bs, const int innerRowA,
-                               const int innerColA, const int innerRowB,
-                               const int innerColB) {
-    for (uint offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
-      float4 tmp = reinterpret_cast<float4 *>(
-        &A[(innerRowA + offset) * K + innerColA * 4])[0];
-      // transpose A while storing it
-      As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-      As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-      As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-      As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
-    }
+template <const int BM, const int BN, const int BK, const int rowStrideA,
+const int rowStrideB>
+__device__ void loadFromGmem(const int N, const int K, float *A, float *B,
+                             float *As, float *Bs, const int innerRowA,
+                             const int innerColA, const int innerRowB,
+                             const int innerColB) {
+  for (uint offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+    float4 tmp = reinterpret_cast<float4 *>(
+      &A[(innerRowA + offset) * K + innerColA * 4])[0];
+    // transpose A while storing it
+    As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+    As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+    As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+    As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+  }
 
-    for (uint offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+  for (uint offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+    reinterpret_cast<float4 *>(
+      &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
       reinterpret_cast<float4 *>(
-        &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-        reinterpret_cast<float4 *>(
-          &B[(innerRowB + offset) * N + innerColB * 4])[0];
-    }
+        &B[(innerRowB + offset) * N + innerColB * 4])[0];
   }
+}
 
-  template <const int BM, const int BN, const int BK, const int WM, const int WN,
-    const int WMITER, const int WNITER, const int WSUBM, const int WSUBN,
-    const int TM, const int TN>
-  __device__ void processFromSmem(float *regM, float *regN, float *threadResults, 
-                                  const float *As, const float *Bs, const uint warpRow, 
-                                  const uint warpCol, const uint threadRowInWarp, 
-                                  const uint threadColInWarp) {
-    for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
-      for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-        for (uint i = 0; i < TM; ++i) {
-          regM[wSubRowIdx + i] =
-            As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM +
-            threadRowInWarp + i];
-        }
+template <const int BM, const int BN, const int BK, const int WM, const int WN,
+const int WMITER, const int WNITER, const int WSUBM, const int WSUBN,
+const int TM, const int TN>
+__device__ void processFromSmem(float *regM, float *regN, float *threadResults, 
+                                const float *As, const float *Bs, const uint warpRow, 
+                                const uint warpCol, const uint threadRowInWarp, 
+                                const uint threadColInWarp) {
+  for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
+    for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+      for (uint i = 0; i < TM; ++i) {
+        regM[wSubRowIdx + i] =
+          As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM +
+          threadRowInWarp * TM];
       }
+    }
+    for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+      for (uint i = 0; i < TN; ++i) {
+        regN[wSubColIdx * TN + i] =
+          Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN +
+          threadColInWarp * TN + i];
+      }
+    }
+
+    for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
       for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-        for (uint i = 0; i < TN; ++i) {
-          regN[wSubColIdx * TN + i] =
-            Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN +
-            threadColInWarp * TN + i];
-        }
-      }
-
-      for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-        for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-          //calculate per-thread results
-          //multiply_dense(wSubRowIdx, wSubColIdx, WNITER, regM[wSubRowIdx], regN, threadResults);
-          for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
-            for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
-              threadResults[(wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
-                            (wSubColIdx * TN) + resIdxN] +=
-                  regM[wSubRowIdx * TM + resIdxM] *
-                  regN[wSubColIdx * TN + resIdxN];
-            }
-          }
-        }
+        //calculate per-thread results
+        multiply_dense(wSubRowIdx, wSubColIdx, WNITER, regM[wSubRowIdx], regN, threadResults);
       }
     }
   }
+}
 } // namespace db
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
@@ -115,9 +108,9 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
   const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
   const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-  // allocate space for the current blocktile in SMEM
-  __shared__ float As[2 * BM * BK];
-  __shared__ float Bs[2 * BK * BN];
+  // Allocate space for the current blocktile in SMEM
+  __shared__ float As[2][BM * BK];
+  __shared__ float Bs[2][BK * BN];
 
   // Divide threads into two groups: loaders and computers
   bool doubleBufferIdx = threadIdx.x >= (NUM_THREADS / 2);
@@ -128,8 +121,7 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
 
   /**
    * Calculate the indices that this thread will load into SMEM.
-   * This is half of what we used for other kernels since we are dividing into
-   * loaders and computers
+   * This is half of what we used for other kernels since we are dividing into two groups
    */
   const uint innerRowA = (threadIdx.x % (NUM_THREADS / 2)) / (BK / 4);
   const uint innerColA = (threadIdx.x % (NUM_THREADS / 2)) % (BK / 4);
@@ -145,57 +137,53 @@ esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *
   if (doubleBufferIdx == 0) {
     // Load block 0
     db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
-      N, K, A, B, As, Bs, innerRowA, innerColA, innerRowB, innerColB);
-    __syncthreads();
+      N, K, A, B, As[0], Bs[0], innerRowA, innerColA, innerRowB, innerColB);
   }
+
+  __syncthreads();
 
   // outer-most loop over block tiles
   for (uint bkIdx = 0; bkIdx < K; bkIdx += 2 * BK) {
     if (doubleBufferIdx == 0) {
       // Process block 0
       db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM,
-        TN>(regM, regN, threadResults, As, Bs, warpRow,
+        TN>(regM, regN, threadResults, As[0], Bs[0], warpRow,
             warpCol, threadRowInWarp, threadColInWarp);
-      __syncthreads();
 
       // Process block 1 (loaded by other side)
       if (bkIdx + BK < K) {
         db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
-          TM, TN>(regM, regN, threadResults, As + (BM * BK),
-                  Bs + (BK * BN), warpRow, warpCol,
+          TM, TN>(regM, regN, threadResults, As[1],
+                  Bs[1], warpRow, warpCol,
                   threadRowInWarp, threadColInWarp);
       }
-      __syncthreads();
 
       // Load block 2 into the first half of As & Bs (this will be block 0 next iteration)
       if (bkIdx + 2 * BK < K) {
         db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
-          N, K, A + 2 * BK, B + 2 * BK * N, As, Bs, innerRowA, innerColA,
+          N, K, A + 2 * BK, B + 2 * BK * N, As[0], Bs[0], innerRowA, innerColA,
           innerRowB, innerColB);
       }
     } else {
       // Load block 1 into the second half of As & Bs
       if (bkIdx + BK < K) {
         db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
-          N, K, A + BK, B + BK * N, As + (BM * BK), Bs + (BK * BN), innerRowA,
+          N, K, A + BK, B + BK * N, As[1], Bs[1], innerRowA,
           innerColA, innerRowB, innerColB);
       }
-      __syncthreads();
 
       // Process the rest of block 0
       db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM,
-        TN>(regM, regN, threadResults, As, Bs, warpRow,
+        TN>(regM, regN, threadResults, As[0], Bs[0], warpRow,
             warpCol, threadRowInWarp, threadColInWarp);
-      __syncthreads();
 
       // Process the rest of block 1
-      if (bkIdx + BK < K) {
-        db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
-          TM, TN>(regM, regN, threadResults, As + (BM * BK),
-                  Bs + (BK * BN), warpRow, warpCol,
-                  threadRowInWarp, threadColInWarp);
-      }
+      db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
+        TM, TN>(regM, regN, threadResults, As[1],
+                Bs[1], warpRow, warpCol,
+                threadRowInWarp, threadColInWarp);
     }
+
 
     A += 2 * BK;
     B += 2 * BK * N;

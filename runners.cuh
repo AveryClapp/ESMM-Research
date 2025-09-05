@@ -217,14 +217,14 @@ bool run_esmm_warpskipping(int rows, int cols, int inners, float *d_A, float *d_
 bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
   const uint NUM_THREADS = 256;
-  const uint BN = 256;
+  const uint BN = 128;
   const uint BM = 128;
   const uint BK = 16;
-  const uint WN = 32;
-  const uint WM = 128;
-  const uint WNITER = 1;
+  const uint WN = 64;
+  const uint WM = 64;
+  const uint WNITER = 8;
   const uint TN = 8;
-  const uint TM = 8;
+  const uint TM = 1;
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));

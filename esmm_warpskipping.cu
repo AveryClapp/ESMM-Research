@@ -59,7 +59,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 
 	float threadResults[WMITER * TM * WNITER * TN] = {0.0};
-	float regM[WMITER * TM] = {0.0};
+	//float regM[WMITER * TM] = {0.0};
 	float regN[WNITER * TN] = {0.0};
 
 	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {

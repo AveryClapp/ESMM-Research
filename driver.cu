@@ -20,7 +20,7 @@ using std::cin;
 std::vector<int> parse_kernel_selection(const std::string& input) {
     std::vector<int> kernels;
     if (input == "all") {
-        for (int i = 1; i <= 12; i++) {
+        for (int i = 1; i <= 13; i++) {
             kernels.push_back(i);
         }
         return kernels;
@@ -78,7 +78,7 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         cout << "Running kernel " << kernel_choice << ": " << get_kernel_name(kernel_choice) << endl;
     }
 
-    switch (kernel_choice) {
+    switch (kernel_choice){
     case 1: // Naive Implementation
         res = run_naive(rows, cols, inners, d_A, d_B, d_C, runs);
         break;

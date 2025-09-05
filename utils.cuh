@@ -161,7 +161,7 @@ bool verifyResults(const float *gpuResults, const float *cpuResults, int size,
   return true;
 }
 
-__device__ inline void multiply_dense(int wSubRowIdx, int wSubColIdx,
+__forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {
 	const int regNBase = wSubColIdx * 8;
@@ -176,7 +176,7 @@ __device__ inline void multiply_dense(int wSubRowIdx, int wSubColIdx,
 	threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
 }
 
-__device__ inline void multiply_half(int wSubRowIdx, int wSubColIdx,
+ __forceinline__ __device__ void multiply_half(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {
 	const int regNBase = wSubColIdx * 8;
@@ -188,7 +188,7 @@ __device__ inline void multiply_half(int wSubRowIdx, int wSubColIdx,
 }
 
 
-__device__ inline void multiply_quarter(int wSubRowIdx, int wSubColIdx,
+ __forceinline__ __device__ void multiply_quarter(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {
 	const int regNBase = wSubColIdx * 8;
@@ -197,7 +197,7 @@ __device__ inline void multiply_quarter(int wSubRowIdx, int wSubColIdx,
 	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
 }
 
-__device__ inline void multiply_eighth(int wSubRowIdx, int wSubColIdx,
+__forceinline__ __device__ void multiply_eighth(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {
 	const int regNBase = wSubColIdx * 8;

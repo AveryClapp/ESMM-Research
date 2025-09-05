@@ -89,16 +89,16 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		for (uint offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
-				As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-		  		As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-			  	As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-				As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+			As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
 		}
 		for (uint offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
 			reinterpret_cast<float4 *>( 
 				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-			reinterpret_cast<const float4 *>(
-				&B[(innerRowB + offset) * N + innerColB * 4])[0];
+				reinterpret_cast<const float4 *>(
+					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
@@ -107,11 +107,22 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];
 			}
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				// TODO: Can unroll this loop as well
-				for (uint i = 0; i < TN; ++i) {
-					regN[wSubColIdx * TN + i] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + i];
-				}
+				regN[wSubColIdx * TN + 0]= Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
+				regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
+				regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
+				regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
+				regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
+				regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
+				regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
+				regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
 			}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				//if (regM[wSubRowIdx] == 0)
@@ -119,13 +130,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					/* switch_table; */
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-						regM[wSubRowIdx], regN, threadResults);
+					regM[wSubRowIdx], regN, threadResults);
 				}
 			}
 		}
-		A += BK;     
-		B += BK * N; 
-
+		A += BK;
+		B += BK * N;
 		__syncthreads();
 	}
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
@@ -141,8 +151,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					tmp.z = threadResults[i + 2];
 					tmp.w = threadResults[i + 3];
 					reinterpret_cast<float4 *>(
-								&C_interim[(threadRowInWarp * TM + resIdxM) * N +
-								threadColInWarp * TN + resIdxN])[0] = tmp;
+						&C_interim[(threadRowInWarp * TM + resIdxM) * N +
+						threadColInWarp * TN + resIdxN])[0] = tmp;
 				}
 			}
 		}	

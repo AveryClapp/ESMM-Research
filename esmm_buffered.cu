@@ -66,9 +66,9 @@ __device__ void processFromSmem(float *regM, float *regN, float *threadResults,
   for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
       for (uint i = 0; i < TM; ++i) {
-        regM[wSubRowIdx + i] =
+        regM[wSubRowIdx * TM + i] =
           As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM +
-          threadRowInWarp * TM];
+          threadRowInWarp * TM + i];
       }
     }
     for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
@@ -82,7 +82,15 @@ __device__ void processFromSmem(float *regM, float *regN, float *threadResults,
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
       for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
         //calculate per-thread results
-        multiply_dense(wSubRowIdx, wSubColIdx, WNITER, regM[wSubRowIdx], regN, threadResults);
+        //multiply_dense(wSubRowIdx, wSubColIdx, WNITER, regM[wSubRowIdx], regN, threadResults);
+        for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
+          for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
+            threadResults[(wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
+                          (wSubColIdx * TN) + resIdxN] +=
+                regM[wSubRowIdx * TM + resIdxM] *
+                regN[wSubColIdx * TN + resIdxN];
+          }
+        }
       }
     }
   }

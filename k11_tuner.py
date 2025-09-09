@@ -15,114 +15,181 @@ def setup_k11_autotuning():
     Complete autotuning setup for your K11 double buffered kernel
     """
 
-    kernel_string = """
-    #define WARP_SIZE 32
+    kernel_code = """
+namespace db {
+template <const int BM, const int BN, const int BK, const int rowStrideA, const int rowStrideB>
+__device__ void loadFromGmem(const int N, const int K, float *A, float *B,
+                             float *As, float *Bs, const int innerRowA,
+                             const int innerColA, const int innerRowB,
+                             const int innerColB) {
+  for (uint offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+    float4 tmp = reinterpret_cast<float4 *>(
+      &A[(innerRowA + offset) * K + innerColA * 4])[0];
+    // transpose A while storing it
+    As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+    As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+    As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+    As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+  }
 
-    template<
-        const uint BM,     // Block tile size for M dimension
-        const uint BN,     // Block tile size for N dimension  
-        const uint BK,     // Block tile size for K dimension
-        const uint TM,     // Thread tile size for M dimension
-        const uint TN,     // Thread tile size for N dimension
-        const uint WSUBN,  // Warp subtile size for N
-        const uint WSUBM,  // Warp subtile size for M
-        const uint WNITER, // Warp N iterations
-        const uint WMITER, // Warp M iterations
-        const uint NUM_STAGES // Double buffering stages (2 or 3)
-    >
-    __global__ void k11_double_buffered_gemm(
-        float* __restrict__ A,
-        float* __restrict__ B, 
-        float* __restrict__ C,
-        const int M,
-        const int N,
-        const int K
-    ) {
-        // Shared memory double buffering
-        __shared__ float As[NUM_STAGES][BM * BK];
-        __shared__ float Bs[NUM_STAGES][BK * BN];
+  for (uint offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+    reinterpret_cast<float4 *>(
+      &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
+      reinterpret_cast<float4 *>(
+        &B[(innerRowB + offset) * N + innerColB * 4])[0];
+  }
+}
 
-        // Register file buffers for double buffering SMEM->RF
-        float regA[NUM_STAGES][TM];
-        float regB[NUM_STAGES][TN];
-        float threadResults[TM * TN] = {0.0f};
-
-        // Thread and warp identification
-        const uint threadRow = threadIdx.x / BN;
-        const uint threadCol = threadIdx.x % BN;
-        const uint warpId = threadIdx.x / WARP_SIZE;
-        const uint laneId = threadIdx.x % WARP_SIZE;
-
-        // Warp tiling coordinates
-        const uint warpRow = (warpId / (BN / WSUBM)) * WSUBM;
-        const uint warpCol = (warpId % (BN / WSUBM)) * WSUBN;
-
-        // Global memory pointers
-        A += blockIdx.y * BM * K;
-        B += blockIdx.x * BN;
-        C += blockIdx.y * BM * N + blockIdx.x * BN;
-
-        // Pipeline stages
-        int stage = 0;
-        int load_stage = 0;
-        int compute_stage = 0;
-
-        // Initial load into stage 0
-        load_gmem_to_smem(A, B, As[0], Bs[0], threadRow, threadCol, K, N);
-        __syncthreads();
-
-        // Main double buffered loop
-        for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
-            // Determine next stages
-            load_stage = (stage + 1) % NUM_STAGES;
-            compute_stage = stage;
-
-            // Async load next tile to SMEM while computing current
-            if (bkIdx + BK < K) {
-                load_gmem_to_smem(A + BK, B + BK * N, As[load_stage], Bs[load_stage], 
-                                threadRow, threadCol, K, N);
-            }
-
-            // Load current tile from SMEM to registers (first stage of RF double buffering)
-            load_smem_to_regs(As[compute_stage], Bs[compute_stage], regA[0], regB[0], 
-                            threadRow, threadCol, warpRow, warpCol);
-
-            // Inner loop with register file double buffering
-            for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
-                uint reg_load_stage = (dotIdx + 1) % NUM_STAGES;
-                uint reg_compute_stage = dotIdx % NUM_STAGES;
-
-                // Prefetch next iteration to registers
-                if (dotIdx + 1 < BK) {
-                    load_smem_to_regs_next(As[compute_stage], Bs[compute_stage], 
-                                         regA[reg_load_stage], regB[reg_load_stage],
-                                         dotIdx + 1, threadRow, threadCol, warpRow, warpCol);
-                }
-
-                // Compute using current register values
-                compute_warp_tile(regA[reg_compute_stage], regB[reg_compute_stage], 
-                                threadResults, warpRow, warpCol);
-            }
-
-            // Synchronize before next iteration
-            __syncthreads();
-
-            // Advance pointers and stage
-            A += BK;
-            B += BK * N;
-            stage = load_stage;
-        }
-
-        // Write results back to global memory
-        write_results_to_gmem(C, threadResults, threadRow, threadCol, M, N);
+template <const int BM, const int BN, const int BK, const int WM, const int WN, const int WMITER, const int WNITER, const int WSUBM, const int WSUBN, const int TM, const int TN>
+__device__ void processFromSmem(float *regM, float *regN, float *threadResults, 
+                                const float *As, const float *Bs, const uint warpRow, 
+                                const uint warpCol, const uint threadRowInWarp, 
+                                const uint threadColInWarp) {
+  for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
+    for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+        regM[wSubRowIdx] =
+          As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM +
+          threadRowInWarp];
     }
-    
-    // Helper device functions would be implemented here
-    __device__ void load_gmem_to_smem(...) { /* Implementation */ }
-    __device__ void load_smem_to_regs(...) { /* Implementation */ }
-    __device__ void load_smem_to_regs_next(...) { /* Implementation */ }
-    __device__ void compute_warp_tile(...) { /* Implementation */ }
-    __device__ void write_results_to_gmem(...) { /* Implementation */ }
+    for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+      for (uint i = 0; i < TN; ++i) {
+        regN[wSubColIdx * TN + i] =
+          Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN +
+          threadColInWarp * TN + i];
+      }
+    }
+
+    for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+      for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+        //calculate per-thread results
+        multiply_dense(wSubRowIdx, wSubColIdx, WNITER, regM[wSubRowIdx], regN, threadResults);
+      }
+    }
+  }
+}
+} // namespace db
+
+template <const int BM, const int BN, const int BK, const int WM, const int WN, const int WNITER, const int TM, const int TN, const int NUM_THREADS>
+__global__ void __launch_bounds__(NUM_THREADS)
+esmm_buffered(const int M, const int N, const int K, float *A, float *B, float *C) {
+  const uint cRow = blockIdx.y;
+  const uint cCol = blockIdx.x;
+
+  const uint warpIdx = threadIdx.x / WARPSIZE;
+  const uint warpCol = warpIdx % (BN / WN);
+  const uint warpRow = warpIdx / (BN / WN);
+
+  constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+  constexpr uint WSUBM = WM / WMITER;
+  constexpr uint WSUBN = WN / WNITER;
+
+  const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
+  const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
+  const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
+
+  // Allocate space for the current blocktile in SMEM
+  __shared__ float As[2][BM * BK];
+  __shared__ float Bs[2][BK * BN];
+
+  // Divide threads into two groups: loaders and computers
+  bool doubleBufferIdx = threadIdx.x >= (NUM_THREADS / 2);
+
+  A += cRow * BM * K;
+  B += cCol * BN;
+  C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
+
+  /**
+   * Calculate the indices that this thread will load into SMEM.
+   * This is half of what we used for other kernels since we are dividing into two groups
+   */
+  const uint innerRowA = (threadIdx.x % (NUM_THREADS / 2)) / (BK / 4);
+  const uint innerColA = (threadIdx.x % (NUM_THREADS / 2)) % (BK / 4);
+  constexpr uint rowStrideA = ((NUM_THREADS / 2) * 4) / BK;
+  const uint innerRowB = (threadIdx.x % (NUM_THREADS / 2)) / (BN / 4);
+  const uint innerColB = (threadIdx.x % (NUM_THREADS / 2)) % (BN / 4);
+  constexpr uint rowStrideB = (NUM_THREADS / 2) / (BN / 4);
+
+  float threadResults[WMITER * TM * WNITER * TN] = {0.0};
+  float regM[WMITER * TM] = {0.0};
+  float regN[WNITER * TN] = {0.0};
+
+  if (doubleBufferIdx == 0) {
+    // Load block 0
+    db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
+      N, K, A, B, As[0], Bs[0], innerRowA, innerColA, innerRowB, innerColB);
+  }
+
+  __syncthreads();
+
+  // outer-most loop over block tiles
+  for (uint bkIdx = 0; bkIdx < K; bkIdx += 2 * BK) {
+    if (doubleBufferIdx == 0) {
+      // Process block 0
+      db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM,
+        TN>(regM, regN, threadResults, As[0], Bs[0], warpRow,
+            warpCol, threadRowInWarp, threadColInWarp);
+
+      // Process block 1 (loaded by other side)
+      if (bkIdx + BK < K) {
+        db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
+          TM, TN>(regM, regN, threadResults, As[1],
+                  Bs[1], warpRow, warpCol,
+                  threadRowInWarp, threadColInWarp);
+      }
+
+      // Load block 2 into the first half of As & Bs (this will be block 0 next iteration)
+      if (bkIdx + 2 * BK < K) {
+        db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
+          N, K, A + 2 * BK, B + 2 * BK * N, As[0], Bs[0], innerRowA, innerColA,
+          innerRowB, innerColB);
+      }
+    } else {
+      // Load block 1 into the second half of As & Bs
+      if (bkIdx + BK < K) {
+        db::loadFromGmem<BM, BN, BK, rowStrideA, rowStrideB>(
+          N, K, A + BK, B + BK * N, As[1], Bs[1], innerRowA,
+          innerColA, innerRowB, innerColB);
+      }
+
+      // Process the rest of block 0
+      db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM,
+        TN>(regM, regN, threadResults, As[0], Bs[0], warpRow,
+            warpCol, threadRowInWarp, threadColInWarp);
+
+      // Process the rest of block 1
+      db::processFromSmem<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN,
+        TM, TN>(regM, regN, threadResults, As[1],
+                Bs[1], warpRow, warpCol,
+                threadRowInWarp, threadColInWarp);
+    }
+
+
+    A += 2 * BK;
+    B += 2 * BK * N;
+    __syncthreads();
+  }
+
+  for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+    for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+      float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
+      for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
+        for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
+          float4 tmp;
+          const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
+            wSubColIdx * TN + resIdxN;
+          tmp.x = threadResults[i + 0];
+          tmp.y = threadResults[i + 1];
+          tmp.z = threadResults[i + 2];
+          tmp.w = threadResults[i + 3];
+          // write back
+          reinterpret_cast<float4 *>(
+            &C_interim[(threadRowInWarp * TM + resIdxM) * N +
+            threadColInWarp * TN + resIdxN])[0] = tmp;
+        }
+      }
+    }
+  }
+}
     """
 
     # Test matrix dimensions - start with sizes where you have performance gaps vs cuBLAS
@@ -136,66 +203,69 @@ def setup_k11_autotuning():
     # Comprehensive parameter space based on your existing autotuning
     tune_params = {
         # Block tiling parameters - expand from your current best configs
+        "NUM_THREADS": [128, 256],
         "BM": [64, 128, 256],
         "BN": [64, 128, 256],
         "BK": [8, 16, 32],
         # Thread tiling - optimize for register usage
         "TM": [1],
-        "TN": [4, 8, 16],
+        "TN": [8, 16, 32],
         # Warp tiling parameters - critical for double buffering efficiency
-        "WSUBN": [16, 32, 64],
-        "WSUBM": [16, 32, 64],
+        "WN": [16, 32, 64],
+        "WM": [16, 32, 64],
         "WNITER": [1, 2, 4],
-        "WMITER": [1, 2, 4],
-        # Double buffering stages - key parameter for your k11 kernel
-        "NUM_STAGES": [2, 3, 4],  # 2=basic double buf, 3+ = deeper pipelining
     }
 
     # Constraints to ensure valid configurations
     restrictions = [
-        # Block size constraints
-        "BM >= TM * WMITER * WSUBM",
-        "BN >= TN * WNITER * WSUBN",
-        "BM * BN <= 1024",  # Max threads per block
-        # Warp constraints
-        "WSUBM * WSUBN <= 32",  # Warp size
-        "BM % (WSUBM * WMITER) == 0",
-        "BN % (WSUBN * WNITER) == 0",
-        # Memory constraints - ensure SMEM fits
-        "NUM_STAGES * (BM * BK + BK * BN) * 4 <= 49152",  # 48KB SMEM limit
-        # Register pressure constraints
-        "TM * TN * NUM_STAGES <= 64",  # Rough register estimate
+        "BN % WN == 0",
+        "BM % WM == 0",
+        "(BN / WN) * (BM / WM) == NUM_THREADS / 32",
+        "(WM * WN) % (32 * TM * TN * WNITER) == 0",
+        "WN % WNITER == 0",
+        "(NUM_THREADS / 2 * 4) % BK == 0",
+        "(NUM_THREADS / 2 * 4) % BN == 0",
+        "BN % (16 * TN) == 0",
+        "BM % (16 * TM) == 0",
+        "(BM * BK) % (4 * NUM_THREADS / 2) == 0",
+        "(BN * BK) % (4 * NUM_THREADS / 2) == 0",
+        # WM % WMITER == 0
+        "WM % ((WM * WN) / (32 * TM * TM * WNITER)) == 0",
     ]
 
-    return kernel_string, tune_params, restrictions, test_sizes
+    return kernel_code, tune_params, restrictions, test_sizes
 
 
 def run_comprehensive_autotuning():
     """
     Run systematic autotuning across multiple matrix sizes and optimization strategies
     """
-    kernel_string, tune_params, restrictions, test_sizes = setup_k11_autotuning()
+    kernel_code, tune_params, restrictions, test_sizes = setup_k11_autotuning()
 
     results = {}
 
     for M, N, K in test_sizes:
         print(f"\n=== Autotuning for matrix size {M}x{N}x{K} ===")
 
-        # Setup test data
-        np.random.seed(42)  # Reproducible results
+        np.random.seed(42)
         A = np.random.randn(M, K).astype(np.float32)
         B = np.random.randn(K, N).astype(np.float32)
         C = np.zeros((M, N), dtype=np.float32)
 
         args = [A, B, C, np.int32(M), np.int32(N), np.int32(K)]
 
-        # Grid dimensions
-        grid_size = ((N + 128 - 1) // 128, (M + 128 - 1) // 128, 1)
+        def grid_dimensions(config):
+            bm, bn = config.get("BM", 128), config.get("BN", 128)
+            return ((N + bn - 1) // bn, (M + bm - 1) // bm, 1)
 
-        # Custom metrics for ML workloads
+        def verify_output(params, answer, atol=1e-4):
+            reference = np.dot(A, B).astype(np.float32)
+            if answer is None:
+                return False
+            return np.allclose(answer, reference, atol=atol)
+
         def custom_metrics(gpu_args):
-            # Calculate effective bandwidth and FLOP/s
-            flops = 2 * M * N * K  # FMA operations
+            flops = 2 * M * N * K  # Fused multiply-add ops
             memory_bytes = (M * K + K * N + M * N) * 4  # float32
 
             return {
@@ -204,75 +274,28 @@ def run_comprehensive_autotuning():
                 "arithmetic_intensity": flops / memory_bytes,
             }
 
-        # Multi-objective optimization strategies
-        optimization_strategies = [
-            {"strategy": "minimize", "objective": "time"},
-            {"strategy": "minimize", "objective": "energy"},  # For sustainable ML
-            {"strategy": "maximize", "objective": "GFLOPS"},
-            {"strategy": "bayes_opt", "max_fevals": 200},  # Smart search
-        ]
+        try:
+            results = tune_kernel(
+                "esmm_buffereed",
+                kernel_code,
+                grid_dimensions,
+                args,
+                tune_params,
+                restrictions=restrictions,
+                answer=np.dot(A, B).astype(np.float32),  # Reference for verification
+                atol=1e-4,
+                verbose=True,
+                iterations=3,  # Average over multiple runs
+                cache=f"tuner_results/buffered_cache_{M}x{N}x{K}.json",  # Cache results per size
+            )
 
-        size_results = {}
+            print(f"Performance: {result[1]:.6f} ms")
 
-        for strategy_config in optimization_strategies:
-            strategy_name = f"{strategy_config['strategy']}_{strategy_config.get('objective', 'adaptive')}"
-            print(f"Running {strategy_name} optimization...")
-
-            try:
-                result = tune_kernel(
-                    "k11_double_buffered_gemm",
-                    kernel_string,
-                    grid_size,
-                    args,
-                    tune_params,
-                    restrictions=restrictions,
-                    metrics=custom_metrics,
-                    **strategy_config,
-                    cache="k11_cache.json",  # Cache results
-                    verbose=True,
-                )
-
-                size_results[strategy_name] = {
-                    "best_config": result[0],
-                    "best_time": result[1],
-                    "all_results": result[2],
-                }
-
-                print(f"Best {strategy_name} config: {result[0]}")
-                print(f"Performance: {result[1]:.6f} ms")
-
-            except Exception as e:
-                print(f"Strategy {strategy_name} failed: {e}")
-                continue
-
-        results[f"{M}x{N}x{K}"] = size_results
-
-        # Analyze double buffering effectiveness
-        analyze_double_buffering_impact(size_results)
+        except Exception as e:
+            print(f"e")
+            continue
 
     return results
-
-
-def analyze_double_buffering_impact(results):
-    """
-    Analyze how different NUM_STAGES values affect performance
-    """
-    print("\n=== Double Buffering Analysis ===")
-
-    stage_performance = {}
-    for strategy, data in results.items():
-        if "all_results" in data:
-            for config, perf_data in data["all_results"].items():
-                stages = config.get("NUM_STAGES", 2)
-                if stages not in stage_performance:
-                    stage_performance[stages] = []
-                stage_performance[stages].append(perf_data["time"])
-
-    # Report optimal staging strategy
-    for stages, times in stage_performance.items():
-        avg_time = np.mean(times)
-        std_time = np.std(times)
-        print(f"NUM_STAGES={stages}: {avg_time:.6f}±{std_time:.6f} ms")
 
 
 def generate_production_templates(results):

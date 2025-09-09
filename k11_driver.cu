@@ -78,7 +78,7 @@ bool run_esmm_buffered(int N, int M, int K, float *d_A, float *d_B,
   if (error != cudaSuccess) {
     printf("CUDA error: %s\n", cudaGetErrorString(error));
   }
-  
+
   cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost);
   return verifyResults(h_C, h_C_ref, M * N);
 }

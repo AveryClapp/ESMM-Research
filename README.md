@@ -65,9 +65,7 @@ The codebase incorporates insights from cutting-edge research:
 
 ## TODOs: 
 - [ ] [KernelTuner](https://github.com/KernelTuner/kernel_tuner)
-- [ ] [Cutlass](https://github.com/NVIDIA/cutlass) inspired double-buffering
 - [ ] Padding to avoid bank conflicts (need to check our current relationship with bank conflicts)
-- [ ] Revisit Inner Dimension Constraint Results
 - [ ] Take a look at the [PIT Paper](https://arxiv.org/pdf/2301.10936)
 - [ ] Generate 256 kernels
 - [ ] Tuple (Offset, Value) for A-Sparsity??

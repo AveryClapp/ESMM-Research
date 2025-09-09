@@ -227,15 +227,15 @@ bool run_esmm_buffered(int N, int M, int K, float *d_A, float *d_B,
   const uint TN = 8;
   const uint TM = 1;
   */
-  const uint K11_NUM_THREADS = 256;
-  const uint K11_BN = 256;
+  const uint K11_NUM_THREADS = 128;
+  const uint K11_BN = 128;
   const uint K11_BM = 128;
   const uint K11_BK = 16;
-  const uint K11_WN = 32;
-  const uint K11_WM = 128;
-  const uint K11_WNITER = 1;
+  const uint K11_WN = 64;
+  const uint K11_WM = 64;
+  const uint K11_WNITER = 8;
   const uint K11_TN = 8;
-  const uint K11_TM = 8;
+  const uint K11_TM = 1;
   dim3 blockDim(K11_NUM_THREADS);
 
   constexpr uint NUM_WARPS = K11_NUM_THREADS / 32;

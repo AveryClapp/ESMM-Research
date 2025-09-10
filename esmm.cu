@@ -106,6 +106,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];
 			}
+			/* Load 8 values into the register, can adjust this based on sparsity too?*/
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 				regN[wSubColIdx * TN + 0]= Bs[(dotIdx * BN) + warpCol * 
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];

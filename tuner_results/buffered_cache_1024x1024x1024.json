@@ -1,0 +1,59 @@
+{
+"device_name": "NVIDIA A10G",
+"kernel_name": "esmm_buffered",
+"problem_size": "callable",
+"tune_params_keys": [
+"NUM_THREADS",
+"BM",
+"BN",
+"BK",
+"TM",
+"TN",
+"WM",
+"WN",
+"WNITER"
+],
+"tune_params": {
+"NUM_THREADS": [
+128,
+256
+],
+"BM": [
+64,
+128,
+256
+],
+"BN": [
+64,
+128,
+256
+],
+"BK": [
+8,
+16,
+32
+],
+"TM": [
+1
+],
+"TN": [
+8
+],
+"WM": [
+32,
+64,
+128
+],
+"WN": [
+32,
+64,
+128
+],
+"WNITER": [
+1,
+2,
+4
+]
+},
+"objective": "time",
+"cache": {

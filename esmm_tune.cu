@@ -1,0 +1,141 @@
+#pragma once
+
+/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
+
+#include <cuda_runtime.h>
+
+
+#define WARPSIZE 32
+
+// Calculate derived constants from Kernel Tuner defines
+#define WMITER ((WM * WN) / (WARPSIZE * TM * TN * WNITER))
+#define WSUBM (WM / WMITER)
+#define WSUBN (WN / WNITER)
+#define rowStrideA ((NUM_THREADS * 4) / BK)
+#define rowStrideB (NUM_THREADS / (BN / 4))
+
+__forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
+                                int WNITER_val, float regM_val, float* regN,
+                                        float* threadResults) {
+    const int regNBase = wSubColIdx * TN;
+    const int threadResBase = wSubRowIdx * (WNITER_val * TN) + (wSubColIdx * TN);
+    
+    for (int i = 0; i < TN; ++i) {
+        threadResults[threadResBase + i] += regM_val * regN[regNBase + i];
+    }
+}
+
+
+/*
+ * @tparam BM The threadblock size for M dimension SMEM caching.
+ * @tparam BN The threadblock size for N dimension SMEM caching.
+ * @tparam BK The threadblock size for K dimension SMEM caching.
+ * @tparam WM M dim of continuous tile computed by each warp
+ * @tparam WN N dim of continuous tile computed by each warp
+ * @tparam WMITER The number of subwarp tiling steps in M dimension.
+ * @tparam WNITER The number of subwarp tiling steps in N dimension.
+ * @tparam TM The per-thread tile size for M dimension.
+ * @tparam TN The per-thread tile size for N dimension.
+ */
+__global__ void __launch_bounds__(NUM_THREADS)
+esmm(int M, int N, int K, float *A, float *B, float *C) {
+	const uint cRow = blockIdx.y;
+	const uint cCol = blockIdx.x;
+
+	const uint warpIdx = threadIdx.x / WARPSIZE;
+	const uint warpCol = warpIdx % (BN / WN);
+	const uint warpRow = warpIdx / (BN / WN);
+
+	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
+	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
+	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
+
+	__shared__ float As[BN * BK];
+	__shared__ float Bs[BM * BK];
+
+	A += cRow * BM * K;
+	B += cCol * BN;
+	C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
+
+	const uint innerRowA = threadIdx.x / (BK / 4);
+	const uint innerColA = threadIdx.x % (BK / 4);
+	const uint innerRowB = threadIdx.x / (BN / 4);
+	const uint innerColB = threadIdx.x % (BN / 4);
+
+	float threadResults[WMITER * TM * WNITER * TN] = {0.0};
+	float regM[WMITER * TM] = {0.0};
+	float regN[WNITER * TN] = {0.0};
+
+	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
+		for (uint offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+			const float4 tmp = reinterpret_cast<const float4 *>(
+				&A[(innerRowA + offset) * K + innerColA * 4])[0];
+			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+			As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+		}
+		for (uint offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+			reinterpret_cast<float4 *>( 
+				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
+				reinterpret_cast<const float4 *>(
+					&B[(innerRowB + offset) * N + innerColB * 4])[0];
+		}
+		__syncthreads();
+		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
+			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+					wSubRowIdx * WSUBM + threadRowInWarp * TM];
+			}
+			/* Load 8 values into the register, can adjust this based on sparsity too?*/
+			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+				regN[wSubColIdx * TN + 0]= Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
+				regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
+				regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
+				regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
+				regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
+				regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
+				regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
+				regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+			}
+			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+					/* switch_table; */
+					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
+		    regM[wSubRowIdx], regN, threadResults);
+				}
+			}
+		}
+		A += BK;
+		B += BK * N;
+		__syncthreads();
+	}
+	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
+			for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
+				for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
+					float4 tmp;
+					const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
+						wSubColIdx * TN + resIdxN;
+					tmp.x = threadResults[i + 0];
+					tmp.y = threadResults[i + 1];
+					tmp.z = threadResults[i + 2];
+					tmp.w = threadResults[i + 3];
+					reinterpret_cast<float4 *>(
+						&C_interim[(threadRowInWarp * TM + resIdxM) * N +
+						threadColInWarp * TN + resIdxN])[0] = tmp;
+				}
+			}
+		}	
+	}		
+}
+

@@ -90,8 +90,8 @@ def run_autotuning():
 
         try:
             result = tune_kernel(
-                "esmm_buffered",  # Kernel name
-                "esmm_buffered_tune.cu",  # External .cu file
+                "esmm",  # Kernel name
+                "esmm_tune.cu",  # External .cu file
                 grid_dimensions,  # Grid size function
                 args,  # Kernel arguments
                 tune_params,  # Parameters to tune
@@ -164,11 +164,11 @@ def analyze_results(results):
 
 
 if __name__ == "__main__":
-    print("Starting K11 Double Buffered Kernel Autotuning...")
+    print("Starting Kernel Autotuning...")
     print("=" * 70)
 
     # Check if the kernel file exists
-    kernel_file = "esmm_buffered_tune.cu"
+    kernel_file = "esmm_tune.cu"
     if not os.path.exists(kernel_file):
         print(f"Error: Kernel file '{kernel_file}' not found!")
         print("Make sure the C-compatible kernel file is in the current directory.")
@@ -183,10 +183,10 @@ if __name__ == "__main__":
     # Analyze and save results
     analysis = analyze_results(results)
 
-    with open("k11_autotuning_results.json", "w") as f:
+    with open("autotuning_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    with open("k11_performance_analysis.json", "w") as f:
+    with open("performance_analysis.json", "w") as f:
         json.dump(analysis, f, indent=2)
 
     print("\n" + "=" * 70)
@@ -200,8 +200,8 @@ if __name__ == "__main__":
         )
 
     print(f"\nFiles generated:")
-    print(f"  - k11_autotuning_results.json: Raw autotuning results")
-    print(f"  - k11_performance_analysis.json: Performance analysis")
+    print(f"  - autotuning_results.json: Raw autotuning results")
+    print(f"  - performance_analysis.json: Performance analysis")
 
     # Find best overall configuration
     best_gflops = 0

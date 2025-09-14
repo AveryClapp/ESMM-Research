@@ -117,6 +117,11 @@ def tune_single_size(M, N, K, tune_params, restrictions):
     def metrics_func(gpu_args):
         return calculate_metrics(gpu_args, A, M, N, K)
 
+    def verify_esmm(cpu_result, gpu_result, atol=1e-4):
+        if gpu_result is None:
+            return False
+        return np.allclose(reference, gpu_result[3], atol=atol)
+
     try:
         reference = np.dot(A, B).astype(np.float32)
 
@@ -126,8 +131,10 @@ def tune_single_size(M, N, K, tune_params, restrictions):
             grid_func,
             args,
             tune_params,
+            verify=verify_esmm,
             block_size_names=["NUM_THREADS"],
             restrictions=restrictions,
+            atol=1e-4,
             verbose=True,
             iterations=3,
             compiler_options=[
@@ -163,6 +170,8 @@ def tune_single_size(M, N, K, tune_params, restrictions):
                 "sparsity": sparsity,
                 "all_results": result[2] if len(result) > 2 else None,
             }
+    except RuntimeError as e:
+        print(f"Error: {e}")
     except Exception as e:
         import traceback
 
@@ -242,11 +251,10 @@ def print_summary(analysis):
     if analysis["performance_summary"]:
         print("\nResults:")
         for size, perf in analysis["performance_summary"].items():
+            print(size, perf)
+            print(f"{size}: {perf['dense_gflops']} GFLOPS ({perf['time_ms']} ms)")
             print(
-                f"{size}: {perf['dense_gflops']:.2f} GFLOPS ({perf['time_ms']:.3f} ms)"
-            )
-            print(
-                f"  Sparse: {perf['sparse_gflops']:.2f} GFLOPS, Sparsity: {perf['sparsity']:.1%}"
+                f"  Sparse: {perf['sparse_gflops']} GFLOPS, Sparsity: {perf['sparsity']}"
             )
 
         if analysis["best_overall"]["config"]:

@@ -10,7 +10,7 @@
 #include "./old_kernels/1d_warptiling_tm.cu"
 #include "./esmm.cu"
 #include "./esmm_warpskipping.cu"
-#include "./esmm_buffered.cu"
+#include "./old_kernels/esmm_buffered.cu"
 #include "./old_kernels/1D_vec.cu"
 #include "utils.cuh"
 #include <chrono>
@@ -162,13 +162,13 @@ bool run_1d_warptiling(int rows, int cols, int inners, float *d_A, float *d_B,
 
 bool run_esmm(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint K10_NUM_THREADS = 256;
+  const uint K10_NUM_THREADS = 128;
   const uint K10_BN = 128;
-  const uint K10_BM = 128;
+  const uint K10_BM = 64;
   const uint K10_BK = 16;
   const uint K10_WN = 64;
   const uint K10_WM = 32;
-  const uint K10_WNITER = 4;
+  const uint K10_WNITER = 1;
   const uint K10_TN = 8;
   const uint K10_TM = 1;
 

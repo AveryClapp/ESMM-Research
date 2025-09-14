@@ -64,7 +64,7 @@ The codebase incorporates insights from cutting-edge research:
 
 
 ## TODOs: 
-- [ ] [KernelTuner](https://github.com/KernelTuner/kernel_tuner)
+- [ ] [KernelTuner](https://github.com/KernelTuner/kernel_tuner) Verification
 - [ ] Padding to avoid bank conflicts (need to check our current relationship with bank conflicts)
 - [ ] Take a look at the [PIT Paper](https://arxiv.org/pdf/2301.10936)
 - [ ] Generate 256 kernels

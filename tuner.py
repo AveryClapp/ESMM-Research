@@ -1,229 +1,272 @@
-"""
-Fixed K11 Double Buffered Kernel Autotuning
-Uses external .cu file instead of embedded kernel code
-"""
-
 import json
 import os
-from typing import Dict, List, Tuple
+import sys
 
 import numpy as np
 from kernel_tuner import tune_kernel
 
 
-def setup_k11_autotuning():
-    """
-    Setup autotuning for K11 kernel using external .cu file
-    """
+def setup_environment():
+    os.makedirs("tuner_results", exist_ok=True)
 
-    # Test sizes for autotuning
-    test_sizes = [
-        (512, 512, 512),
-        (1024, 1024, 1024),
-        (2048, 2048, 2048),
-    ]
+    if not os.path.exists("esmm_tune.cu"):
+        print("Error: esmm_tune.cu not found!")
+        sys.exit(1)
 
-    # Tunable parameters
-    tune_params = {
-        "NUM_THREADS": [128, 256],
+
+def get_test_matrices(M, N, K):
+    np.random.seed(42)
+    A = np.random.randn(M, K).astype(np.float32)
+    B = np.random.randn(K, N).astype(np.float32)
+    C = np.zeros((M, N), dtype=np.float32)
+
+    pattern = [1, 0, 1, 0, 1, 0, 1, 0]
+    for i in range(M):
+        for j in range(K):
+            if pattern[j % 8] == 0:
+                A[i, j] = 0.0
+
+    return A, B, C
+
+
+def get_tuning_params():
+    return {
+        "NUM_THREADS": [128, 256, 512],
         "BM": [64, 128, 256],
         "BN": [64, 128, 256],
-        "BK": [8, 16, 32],
-        "TM": [1],  # Keep fixed for now
+        "BK": [8, 16, 32, 64],
+        "TM": [1],
         "TN": [8],
         "WM": [32, 64, 128],
         "WN": [32, 64, 128],
-        "WNITER": [1, 2, 4],
+        "WNITER": [1, 2, 4, 8],
     }
 
-    # Constraints to ensure valid configurations
-    restrictions = [
+
+def get_restrictions():
+    return [
         "BN % WN == 0",
         "BM % WM == 0",
-        "(BN / WN) * (BM / WM) == NUM_THREADS / 32",
+        "(BN // WN) * (BM // WM) == NUM_THREADS // 32",
         "(WM * WN) % (32 * TM * TN * WNITER) == 0",
         "WN % WNITER == 0",
-        "(NUM_THREADS / 2 * 4) % BK == 0",
-        "(NUM_THREADS / 2 * 4) % BN == 0",
+        "BK % 4 == 0",
+        "BN % 4 == 0",
+        "NUM_THREADS >= BK // 4",
+        "NUM_THREADS >= BN // 4",
+        "(BN * BK + BM * BK) * 4 <= 44032",
+        "BM >= 64",
+        "BN >= 64",
+        "BK >= 8",
+        "WM <= BM",
+        "WN <= BN",
+        "NUM_THREADS <= 512",
+        "WNITER <= 8",
+        "TM <= 4",
+        "WM % ((WM * WN) // (32 * TM * TN * WNITER)) == 0",
+        "((WM * WN) // (32 * TM * TN * WNITER)) * TM * WNITER * TN <= 64",
+        "(NUM_THREADS * 4) % BK == 0",
+        "(NUM_THREADS * 4) % BN == 0",
         "BN % (16 * TN) == 0",
         "BM % (16 * TM) == 0",
-        "(BM * BK) % (4 * NUM_THREADS / 2) == 0",
-        "(BN * BK) % (4 * NUM_THREADS / 2) == 0",
-        # WMITER calculation constraint
-        "WM % ((WM * WN) / (32 * TM * TN * WNITER)) == 0",
-        # Ensure WSUBN is divisible by TN for thread indexing
-        "(WN / WNITER) % TN == 0",
+        "(BM * BK) % (4 * NUM_THREADS) == 0",
+        "(BN * BK) % (4 * NUM_THREADS) == 0",
     ]
 
-    return tune_params, restrictions, test_sizes
+
+def grid_dimensions(config):
+    bm, bn = config.get("BM", 128), config.get("BN", 128)
+    return (
+        (config.get("N", 1024) + bn - 1) // bn,
+        (config.get("M", 1024) + bm - 1) // bm,
+        1,
+    )
 
 
-def run_autotuning():
-    """
-    Run autotuning using external .cu file
-    """
-    tune_params, restrictions, test_sizes = setup_k11_autotuning()
+def calculate_metrics(gpu_args, A, M, N, K):
+    if isinstance(gpu_args, dict):
+        time_ms = gpu_args.get("time", 0)
+    else:
+        time_ms = gpu_args
 
-    os.makedirs("tuner_results", exist_ok=True)
+    time_s = gpu_args["time"] / 1000
+    nnz_A = np.count_nonzero(A)
+    sparse_flops = 2 * nnz_A * N
+    dense_flops = 2 * M * N * K
+    memory_bytes = (M * K + K * N + M * N) * 4
+
+    return {
+        "Sparse_GFLOPS": sparse_flops / (time_s * 1e9),
+        "Dense_GFLOPS": dense_flops / (time_s * 1e9),
+        "Memory_BW_GBps": memory_bytes / (time_s * 1e9),
+        "Sparsity": 1.0 - (nnz_A / (M * K)),
+        "Speedup": dense_flops / sparse_flops,
+    }
+
+
+def tune_single_size(M, N, K, tune_params, restrictions):
+    print(f"Tuning {M}x{N}x{K}")
+
+    A, B, C = get_test_matrices(M, N, K)
+    args = [np.int32(M), np.int32(N), np.int32(K), A, B, C]
+
+    def grid_func(config):
+        bm, bn = config.get("BM", 128), config.get("BN", 128)
+        return ((N + bn - 1) // bn, (M + bm - 1) // bm, 1)
+
+    def metrics_func(gpu_args):
+        return calculate_metrics(gpu_args, A, M, N, K)
+
+    try:
+        reference = np.dot(A, B).astype(np.float32)
+
+        result = tune_kernel(
+            "esmm",
+            "esmm_tune.cu",
+            grid_func,
+            args,
+            tune_params,
+            block_size_names=["NUM_THREADS"],
+            restrictions=restrictions,
+            verbose=True,
+            iterations=3,
+            compiler_options=[
+                "-w",
+                "-O3",
+                "--use_fast_math",
+                "-I.",
+                "-I/home/ec2-user/cuda_work/MMMResearch",
+            ],
+            lang="CUDA",
+            cache=f"tuner_results/esmm_{M}x{N}x{K}.json",
+        )
+
+        if result and len(result) > 1:
+            best_config = result[1].get("best_config")
+            time_s = best_config.get("time", 0) / 1000
+            nnz_A = np.count_nonzero(A)
+            sparse_gflops = (2 * nnz_A * N) / (time_s * 1e9)
+            dense_gflops = (2 * M * N * K) / (time_s * 1e9)
+            sparsity = 1.0 - (nnz_A / (M * K))
+
+            print(f"Best: {time_s * 1000} ms")
+            print(f"Sparse: {sparse_gflops:.2f} GFLOPS")
+            print(f"Dense: {dense_gflops:.2f} GFLOPS")
+            print(f"Sparsity: {sparsity:.1%}")
+            print(f"Config: {best_config}")
+
+            return {
+                "best_config": result[1].get("best_config"),
+                "best_time": result[1],
+                "sparse_gflops": sparse_gflops,
+                "dense_gflops": dense_gflops,
+                "sparsity": sparsity,
+                "all_results": result[2] if len(result) > 2 else None,
+            }
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        print(f"Error: {e}")
+        return None
+
+
+def run_esmm_tuning():
+    setup_environment()
+
+    test_sizes = [(512, 512, 512), (1024, 1024, 1024), (2048, 2048, 2048)]
+    tune_params = get_tuning_params()
+    restrictions = get_restrictions()
+
     results = {}
 
     for M, N, K in test_sizes:
-        print(f"\n=== Autotuning for matrix size {M}x{N}x{K} ===")
-
-        # Create test matrices
-        np.random.seed(42)
-        A = np.random.randn(M, K).astype(np.float32)
-        B = np.random.randn(K, N).astype(np.float32)
-        C = np.zeros((M, N), dtype=np.float32)
-
-        # Arguments for the kernel
-        args = [np.int32(M), np.int32(N), np.int32(K), A, B, C]
-
-        # Grid size calculation function
-        def grid_dimensions(config):
-            bm = config.get("BM", 128)
-            bn = config.get("BN", 128)
-            return ((N + bn - 1) // bn, (M + bm - 1) // bm, 1)
-
-        # Reference answer for verification
-        reference = np.dot(A, B).astype(np.float32)
-
-        try:
-            result = tune_kernel(
-                "esmm",  # Kernel name
-                "esmm_tune.cu",  # External .cu file
-                grid_dimensions,  # Grid size function
-                args,  # Kernel arguments
-                tune_params,  # Parameters to tune
-                restrictions=restrictions,  # Constraints
-                # atol=1e-4,  # Tolerance for verification
-                iterations=3,
-                verbose=True,  # Print progress
-                block_size_names=["NUM_THREADS"],
-                # answer=reference,
-                compiler_options=[
-                    "-I.",
-                    "-I/home/ec2-user/cuda_work/MMMResearch",
-                    "-w",  # Suppress warnings
-                ],
-                lang="CUDA",
-                cache=f"tuner_results/buffered_cache_{M}x{N}x{K}.json",
-            )
-
-            if result and len(result) > 1:
-                results[f"{M}x{N}x{K}"] = {
-                    "best_config": result[0],
-                    "best_time": result[1],
-                    "all_results": result[2] if len(result) > 2 else None,
-                }
-
-                # Calculate GFLOPS
-                best_time_s = result[1] / 1000
-                gflops = (2 * M * N * K) / (best_time_s * 1e9)
-
-                print(f"Best performance: {result[1]:.6f} ms ({gflops:.2f} GFLOPS)")
-                print(f"Best config: {result[0]}")
-            else:
-                print(f"No valid results found for {M}x{N}x{K}")
-
-        except Exception as e:
-            print(f"Error tuning {M}x{N}x{K}: {str(e)}")
-            continue
+        result = tune_single_size(M, N, K, tune_params, restrictions)
+        if result:
+            results[f"{M}x{N}x{K}"] = result
 
     return results
 
 
 def analyze_results(results):
-    """
-    Analyze autotuning results
-    """
     if not results:
-        print("No results to analyze!")
-        return {}
+        return {"performance_summary": {}, "best_overall": {}}
 
-    analysis = {"performance_summary": {}, "trends": {}}
-
-    for size_key, result_data in results.items():
-        if "best_time" not in result_data:
-            continue
-
-        M, N, K = map(int, size_key.split("x"))
-
-        # Calculate performance metrics
-        flops = 2 * M * N * K
-        time_s = result_data["best_time"] / 1000
-        gflops = flops / (time_s * 1e9)
-
-        analysis["performance_summary"][size_key] = {
-            "gflops": gflops,
-            "time_ms": result_data["best_time"],
-            "config": result_data["best_config"],
-        }
-
-    return analysis
-
-
-if __name__ == "__main__":
-    print("Starting Kernel Autotuning...")
-    print("=" * 70)
-
-    # Check if the kernel file exists
-    kernel_file = "esmm_tune.cu"
-    if not os.path.exists(kernel_file):
-        print(f"Error: Kernel file '{kernel_file}' not found!")
-        print("Make sure the C-compatible kernel file is in the current directory.")
-        exit(1)
-
-    results = run_autotuning()
-
-    if not results:
-        print("No results obtained from autotuning!")
-        exit(1)
-
-    # Analyze and save results
-    analysis = analyze_results(results)
-
-    with open("autotuning_results.json", "w") as f:
-        json.dump(results, f, indent=2)
-
-    with open("performance_analysis.json", "w") as f:
-        json.dump(analysis, f, indent=2)
-
-    print("\n" + "=" * 70)
-    print("AUTOTUNING COMPLETE!")
-    print("=" * 70)
-
-    print("\nPerformance Summary:")
-    for size_key, perf_data in analysis["performance_summary"].items():
-        print(
-            f"  {size_key}: {perf_data['gflops']:.2f} GFLOPS ({perf_data['time_ms']:.3f} ms)"
-        )
-
-    print(f"\nFiles generated:")
-    print(f"  - autotuning_results.json: Raw autotuning results")
-    print(f"  - performance_analysis.json: Performance analysis")
-
-    # Find best overall configuration
+    analysis = {"performance_summary": {}, "best_overall": {}}
     best_gflops = 0
     best_config = None
     best_size = None
 
-    for size_key, perf_data in analysis["performance_summary"].items():
-        if perf_data["gflops"] > best_gflops:
-            best_gflops = perf_data["gflops"]
-            best_config = perf_data["config"]
+    for size_key, result_data in results.items():
+        if "dense_gflops" not in result_data:
+            print(f"Skipping {size_key}")
+            continue
+
+        gflops = result_data["dense_gflops"]
+        analysis["performance_summary"][size_key] = {
+            "dense_gflops": gflops,
+            "sparse_gflops": result_data["sparse_gflops"],
+            "time_ms": result_data["best_time"],
+            "sparsity": result_data["sparsity"],
+            "config": result_data["best_config"],
+        }
+
+        if gflops > best_gflops:
+            best_gflops = gflops
+            best_config = result_data["best_config"]
             best_size = size_key
 
-    if best_config:
-        print(f"\nBest overall configuration:")
-        print(f"  Performance: {best_gflops:.2f} GFLOPS")
-        print(f"  Matrix Size: {best_size}")
-        print(
-            f"  Config: BM={best_config.get('BM')}, BN={best_config.get('BN')}, BK={best_config.get('BK')}"
-        )
-        print(
-            f"          WM={best_config.get('WM')}, WN={best_config.get('WN')}, WNITER={best_config.get('WNITER')}"
-        )
-        print(
-            f"          TM={best_config.get('TM')}, TN={best_config.get('TN')}, NUM_THREADS={best_config.get('NUM_THREADS')}"
-        )
+    all_configs = results["1024x1024x1024"]["all_results"]
+
+    analysis["best_overall"] = {
+        "gflops": best_gflops,
+        "config": best_config,
+        "size": best_size,
+    }
+
+    return analysis
+
+
+def save_results(results, analysis):
+    with open("esmm_results.json", "w") as f:
+        json.dump(results, f, indent=2)
+
+    with open("esmm_analysis.json", "w") as f:
+        json.dump(analysis, f, indent=2)
+
+
+def print_summary(analysis):
+    print("\nTuning Complete!")
+    print("=" * 50)
+
+    if analysis["performance_summary"]:
+        print("\nResults:")
+        for size, perf in analysis["performance_summary"].items():
+            print(
+                f"{size}: {perf['dense_gflops']:.2f} GFLOPS ({perf['time_ms']:.3f} ms)"
+            )
+            print(
+                f"  Sparse: {perf['sparse_gflops']:.2f} GFLOPS, Sparsity: {perf['sparsity']:.1%}"
+            )
+
+        if analysis["best_overall"]["config"]:
+            print(f"\nBest Overall:")
+            print(f"  Performance: {analysis['best_overall']['gflops']:.2f} GFLOPS")
+            print(f"  Matrix Size: {analysis['best_overall']['size']}")
+            print(f"  Config: {analysis['best_overall']['config']}")
+    else:
+        print("No successful results!")
+
+
+def main():
+    print("ESMM Kernel Autotuning for A10G")
+    print("=" * 50)
+
+    results = run_esmm_tuning()
+    analysis = analyze_results(results)
+    save_results(results, analysis)
+    print_summary(analysis)
+
+
+if __name__ == "__main__":
+    main()

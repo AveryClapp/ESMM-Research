@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-#include "utils.cuh"
+#include "../utils.cuh"
 
 /* Experimental improvemnt to esmm.cu, where we leverage double buffering for a more efficient and pipelined kernel */
 

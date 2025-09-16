@@ -18,18 +18,6 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 
-/* 
-  const uint K10_NUM_THREADS = 256;
-  const uint K10_BN = 128;
-  const uint K10_BM = 128;
-  const uint K10_BK = 32;
-  const uint K10_WN = 32;
-  const uint K10_WM = 64;
-  const uint K10_WNITER = 4;
-  const uint K10_TN = 4;
-  const uint K10_TM = 1;
-*/
-
 bool run_naive(int rows, int cols, int inners, float *d_A, float *d_B,
                float *d_C, int runs) {
   dim3 gridDim(CEIL_DIV(cols, 32), CEIL_DIV(rows, 32));

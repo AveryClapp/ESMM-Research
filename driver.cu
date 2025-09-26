@@ -15,8 +15,6 @@ using std::cout;
 using std::endl;
 using std::cin;
 
-
-
 std::vector<int> parse_kernel_selection(const std::string& input) {
     std::vector<int> kernels;
     if (input == "all") {
@@ -40,7 +38,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
     std::string kernel_str;
     while (std::getline(ss, kernel_str, ',')) {
         int kernel = std::stoi(kernel_str);
-        if (kernel >= 1 && kernel <= 12) {
+        if (kernel >= 1 && kernel <= 13) {
             kernels.push_back(kernel);
         }
     }
@@ -66,16 +64,41 @@ const char* get_kernel_name(int kernel_choice) {
     }
 }
 
+void print_usage(const char* program_name) {
+    cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
+    cout << "  kernel_choice: " << endl;
+    cout << "    Single kernel: 1-13 (run specific kernel)" << endl;
+    cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
+    cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
+    cout << "    All: \"all\" (run all kernels 1-13)" << endl;
+    cout << "  runs: number of runs per kernel (default: 1)" << endl;
+    cout << "  Options:" << endl;
+    cout << "    --verbose, -v: Enable verbose output" << endl;
+    cout << "    --no-check, -n: Skip result verification (performance-only mode)" << endl;
+    cout << "    --check-results, -c: Enable result verification (default)" << endl;
+    cout << "    --help, -h: Show this help message" << endl;
+    cout << endl;
+    cout << "Examples:" << endl;
+    cout << "  " << program_name << " 6 10 --verbose --no-check" << endl;
+    cout << "  " << program_name << " 1-5 1 --check-results" << endl;
+    cout << "  " << program_name << " all 1 -v -n" << endl;
+}
+
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners, 
                       float* d_A, float* d_B, float* d_C, 
-                      float* h_C, float* h_C_ref, int runs, bool verbose) {
+                      float* h_C, float* h_C_ref, int runs, 
+                      bool verbose, bool check_results) {
     bool res = false;
 
     // Reset d_C to zeros before each kernel
     cudaCheckError(cudaMemset(d_C, 0, rows * cols * sizeof(float)));
 
     if (verbose) {
-        cout << "Running kernel " << kernel_choice << ": " << get_kernel_name(kernel_choice) << endl;
+        cout << "Running kernel " << kernel_choice << ": " << get_kernel_name(kernel_choice);
+        if (!check_results) {
+            cout << " (Performance-only mode)";
+        }
+        cout << endl;
     }
 
     switch (kernel_choice){
@@ -95,28 +118,60 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         res = run_two_blocktiling(rows, cols, inners, d_A, d_B, d_C, runs);
         break;
     case 6: // Vectorized Memory Accessing
-        res = run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_vectorized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_vectorized_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 7: // 1 Dimensional Vectorized Approach
-        res = run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_1d_vec(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_1d_vec_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 8: // Basic Warptiling
-        res = run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_warptiling_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 9: // 1-Dimensional Warptiling
-        res = run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_1d_warptiling(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_1d_warptiling_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 10: // Emergent Sparsity Matrix Multiplication (our kernel)
-        res = run_esmm(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_esmm(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 11: // Experimental warpskipping approach to ESMM
-        res = run_esmm_warpskipping(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_esmm_warpskipping(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_warpskipping_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 12: // Experimental double buffered approach to ESMM
-        res = run_esmm_buffered(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        if (check_results) {
+            res = run_esmm_buffered(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_buffered_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         break;
     case 13: // cuBlas
-        run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+        if (check_results) {
+            run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+        } else {
+            run_cuBlas_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
         res = true; // Assume cuBLAS always succeeds
         break;
     default:
@@ -125,7 +180,11 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
     }
 
     if (verbose) {
-        cout << "  Status: " << (res ? "PASSED" : "FAILED") << endl;
+        if (check_results) {
+            cout << "  Status: " << (res ? "PASSED" : "FAILED") << endl;
+        } else {
+            cout << "  Status: COMPLETED (no verification)" << endl;
+        }
     }
 
     return res;
@@ -133,14 +192,15 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 
 int main(int argc, char *argv[]) {
     // Define Matrix Dims
-    constexpr int rows = 1024;
-    constexpr int cols = 1024;
-    constexpr int inners = 1024;
+    constexpr int rows = 4096;
+    constexpr int cols = 4096;
+    constexpr int inners = 4096;
 
     // Default values
     std::vector<int> kernel_choices = {6}; // Default to kernel 6
     int runs = 1;
     bool verbose = false;
+    bool check_results = true; // Default to checking results
 
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -151,6 +211,10 @@ int main(int argc, char *argv[]) {
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
+        } else if (arg == "--no-check" || arg == "-n") {
+            check_results = false;
+        } else if (arg == "--check-results" || arg == "-c") {
+            check_results = true;
         } else if (i == 1) {
             // First non-flag argument is kernel choice
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
@@ -161,7 +225,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
             }
-        } else if (i == 2) {
+        } else if (i == 2 && isdigit(arg[0])) {
             // Second non-flag argument is runs
             runs = atoi(argv[i]);
             if (runs <= 0) {
@@ -174,6 +238,7 @@ int main(int argc, char *argv[]) {
     if (verbose) {
         cout << "Matrix dimensions: " << rows << "x" << cols << " * " << cols << "x" << inners << endl;
         cout << "Number of runs per kernel: " << runs << endl;
+        cout << "Result checking: " << (check_results ? "ENABLED" : "DISABLED") << endl;
         cout << "Kernels to run: ";
         for (size_t i = 0; i < kernel_choices.size(); i++) {
             cout << kernel_choices[i];
@@ -210,9 +275,13 @@ int main(int argc, char *argv[]) {
     cudaCheckError(cudaMemcpy(d_B, h_B, inners * cols * sizeof(float),
                               cudaMemcpyHostToDevice));
 
-    // Generate reference solution on CPU
-    if (verbose) cout << "Generating CPU reference solution..." << endl;
-    matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+    // Generate reference solution on CPU only if checking results
+    if (check_results) {
+        if (verbose) cout << "Generating CPU reference solution..." << endl;
+        matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+    } else {
+        if (verbose) cout << "Skipping CPU reference solution (no-check mode)..." << endl;
+    }
 
     // Run selected kernels
     int passed = 0;
@@ -220,18 +289,32 @@ int main(int argc, char *argv[]) {
 
     for (int kernel_choice : kernel_choices) {
         bool result = run_single_kernel(kernel_choice, rows, cols, inners,
-                                       d_A, d_B, d_C, h_C, h_C_ref, runs, verbose);
-        if (result) passed++;
+                                       d_A, d_B, d_C, h_C, h_C_ref, runs, 
+                                       verbose, check_results);
+        if (result || !check_results) passed++; // Count as passed if not checking results
+        
         if (!verbose) {
-            cout << "Kernel " << kernel_choice << " (" << get_kernel_name(kernel_choice) 
-                 << "): " << (result ? "PASSED" : "FAILED") << endl;
+            cout << "Kernel " << kernel_choice << " (" << get_kernel_name(kernel_choice) << "): ";
+            if (check_results) {
+                cout << (result ? "PASSED" : "FAILED");
+            } else {
+                cout << "COMPLETED (no verification)";
+            }
+            cout << endl;
         }
+        
         if (verbose && kernel_choice != kernel_choices.back()) {
             cout << endl;
         }
     }
 
-    cout << endl << "Summary: " << passed << "/" << total << " kernels passed" << endl;
+    cout << endl << "Summary: " << passed << "/" << total << " kernels ";
+    if (check_results) {
+        cout << "passed" << endl;
+    } else {
+        cout << "completed (no verification)" << endl;
+    }
+
     // Clean up memory
     free(h_A);
     free(h_B);
@@ -243,3 +326,4 @@ int main(int argc, char *argv[]) {
 
     return (passed == total) ? 0 : 1;
 }
+

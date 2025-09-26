@@ -49,33 +49,6 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
   return;
 }
 
-void print_usage(const char* program_name) {
-    cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
-    cout << "  kernel_choice: " << endl;
-    cout << "    Single kernel: 1-12 (run specific kernel)" << endl;
-    cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
-    cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-    cout << "    All: \"all\" (run all kernels 1-12)" << endl;
-    cout << "  runs: number of runs per kernel (default: 1)" << endl;
-    cout << "  options:" << endl;
-    cout << "    --verbose or -v: print detailed results" << endl;
-    cout << "    --help or -h: show this help" << endl;
-    cout << endl;
-    cout << "Available kernels:" << endl;
-    cout << "  1:  Naive Implementation" << endl;
-    cout << "  2:  Global Memory Coalescing" << endl;
-    cout << "  3:  Shared Memory Blocks" << endl;
-    cout << "  4:  One Dimensional Blocktiling" << endl;
-    cout << "  5:  Two Dimensional Blocktiling" << endl;
-    cout << "  6:  Vectorized Memory Accessing" << endl;
-    cout << "  7:  1D Vectorized Approach" << endl;
-    cout << "  8:  Basic Warptiling" << endl;
-    cout << "  9:  1D Warptiling" << endl;
-    cout << "  10: Emergent Sparsity Matrix Multiplication (ESMM)" << endl;
-    cout << "  11: ESMM Warpskipping" << endl;
-    cout << "  12: ESMM Double Buffered" << endl;
-    cout << "  13: cuBLAS" << endl;
-}
 
 void randomize_matrix_with_pattern(float *mat, int M, int N,
                   std::vector<int> pattern) {

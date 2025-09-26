@@ -196,8 +196,8 @@ bool run_esmm(int rows, int cols, int inners, float *d_A, float *d_B,
   const uint K10_BN = 128;
   const uint K10_BM = 128;
   const uint K10_BK = 16;
-  const uint K10_WN = 64;
-  const uint K10_WM = 32;
+  const uint K10_WN = 32;
+  const uint K10_WM = 64;
   const uint K10_WNITER = 4;
   const uint K10_TN = 8;
   const uint K10_TM = 1;
@@ -389,8 +389,8 @@ bool run_esmm_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
   const uint K10_BN = 128;
   const uint K10_BM = 128;
   const uint K10_BK = 16;
-  const uint K10_WN = 64;
-  const uint K10_WM = 32;
+  const uint K10_WN = 32;
+  const uint K10_WM = 64;
   const uint K10_WNITER = 4;
   const uint K10_TN = 8;
   const uint K10_TM = 1;

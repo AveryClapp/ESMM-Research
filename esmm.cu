@@ -2,13 +2,13 @@
 
 /* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
 
+#include "utils.cuh"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-#include "utils.cuh"
 
 //#include <unrolled_kernels.cuh>
 
@@ -126,8 +126,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
 			}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				//if (regM[wSubRowIdx] == 0)
-				//	continue;
+				if (regM[wSubRowIdx] == 0)
+					continue;
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					/* switch_table; */
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,

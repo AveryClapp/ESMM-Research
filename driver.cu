@@ -1,5 +1,5 @@
-#include "runners.cuh"
 #include "utils.cuh"
+#include "runners.cuh"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -14,75 +14,6 @@
 using std::cout;
 using std::endl;
 using std::cin;
-
-std::vector<int> parse_kernel_selection(const std::string& input) {
-    std::vector<int> kernels;
-    if (input == "all") {
-        for (int i = 1; i <= 13; i++) {
-            kernels.push_back(i);
-        }
-        return kernels;
-    }
-    // Check if it's a range (e.g., "1-5")
-    size_t dash_pos = input.find('-');
-    if (dash_pos != std::string::npos) {
-        int start = std::stoi(input.substr(0, dash_pos));
-        int end = std::stoi(input.substr(dash_pos + 1));
-        for (int i = start; i <= end && i <= 13; i++) {
-            kernels.push_back(i);
-        }
-        return kernels;
-    }
-    // Check if it's comma-separated (e.g., "1,3,5")
-    std::stringstream ss(input);
-    std::string kernel_str;
-    while (std::getline(ss, kernel_str, ',')) {
-        int kernel = std::stoi(kernel_str);
-        if (kernel >= 1 && kernel <= 13) {
-            kernels.push_back(kernel);
-        }
-    }
-    return kernels;
-}
-
-const char* get_kernel_name(int kernel_choice) {
-    switch (kernel_choice) {
-        case 1: return "Naive Implementation";
-        case 2: return "Global Memory Coalescing";
-        case 3: return "Shared Memory Blocks";
-        case 4: return "One Dimensional Blocktiling";
-        case 5: return "Two Dimensional Blocktiling";
-        case 6: return "Vectorized Memory Accessing";
-        case 7: return "1D Vectorized Approach";
-        case 8: return "Basic Warptiling";
-        case 9: return "1D Warptiling";
-        case 10: return "Emergent Sparsity Matrix Multiplication (ESMM)";
-        case 11: return "ESMM Warpskipping";
-        case 12: return "ESMM Buffered";
-        case 13: return "cuBLAS";
-        default: return "Unknown Kernel";
-    }
-}
-
-void print_usage(const char* program_name) {
-    cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
-    cout << "  kernel_choice: " << endl;
-    cout << "    Single kernel: 1-13 (run specific kernel)" << endl;
-    cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
-    cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-    cout << "    All: \"all\" (run all kernels 1-13)" << endl;
-    cout << "  runs: number of runs per kernel (default: 1)" << endl;
-    cout << "  Options:" << endl;
-    cout << "    --verbose, -v: Enable verbose output" << endl;
-    cout << "    --no-check, -n: Skip result verification (performance-only mode)" << endl;
-    cout << "    --check-results, -c: Enable result verification (default)" << endl;
-    cout << "    --help, -h: Show this help message" << endl;
-    cout << endl;
-    cout << "Examples:" << endl;
-    cout << "  " << program_name << " 6 10 --verbose --no-check" << endl;
-    cout << "  " << program_name << " 1-5 1 --check-results" << endl;
-    cout << "  " << program_name << " all 1 -v -n" << endl;
-}
 
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners, 
                       float* d_A, float* d_B, float* d_C, 
@@ -192,17 +123,16 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 
 int main(int argc, char *argv[]) {
     // Define Matrix Dims
-    constexpr int rows = 4096;
-    constexpr int cols = 4096;
-    constexpr int inners = 4096;
+    constexpr int rows = 1024;
+    constexpr int cols = 1024;
+    constexpr int inners = 1024;
 
     // Default values
-    std::vector<int> kernel_choices = {6}; // Default to kernel 6
+    std::vector<int> kernel_choices = {10};
     int runs = 1;
     bool verbose = false;
-    bool check_results = true; // Default to checking results
+    bool check_results = true;
 
-    // Parse command line arguments
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
@@ -216,7 +146,6 @@ int main(int argc, char *argv[]) {
         } else if (arg == "--check-results" || arg == "-c") {
             check_results = true;
         } else if (i == 1) {
-            // First non-flag argument is kernel choice
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
                 kernel_choices = parse_kernel_selection(arg);
                 if (kernel_choices.empty()) {
@@ -226,7 +155,6 @@ int main(int argc, char *argv[]) {
                 }
             }
         } else if (i == 2 && isdigit(arg[0])) {
-            // Second non-flag argument is runs
             runs = atoi(argv[i]);
             if (runs <= 0) {
                 cout << "Error: Number of runs must be positive" << endl;
@@ -247,35 +175,27 @@ int main(int argc, char *argv[]) {
         cout << endl << endl;
     }
 
-    // Allocate host matrices
     float *h_A = (float *)malloc(rows * inners * sizeof(float));
     float *h_B = (float *)malloc(inners * cols * sizeof(float));
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    // Generate random data w/ given sparsity:
     std::vector<int> sparsity = stringToVector("10101010");
 
-    // Generate A matrix
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-    // Generate B matrix
     randomize_matrix(h_B, inners, cols);
-    // Set h_C to zeros
     memset(h_C, 0, rows * cols * sizeof(float));
 
-    // Allocate device matrices
     float *d_A, *d_B, *d_C;
     cudaCheckError(cudaMalloc(&d_A, rows * inners * sizeof(float)));
     cudaCheckError(cudaMalloc(&d_B, inners * cols * sizeof(float)));
     cudaCheckError(cudaMalloc(&d_C, rows * cols * sizeof(float)));
 
-    // Copy random data to device matrices
     cudaCheckError(cudaMemcpy(d_A, h_A, rows * inners * sizeof(float),
                               cudaMemcpyHostToDevice));
     cudaCheckError(cudaMemcpy(d_B, h_B, inners * cols * sizeof(float),
                               cudaMemcpyHostToDevice));
 
-    // Generate reference solution on CPU only if checking results
     if (check_results) {
         if (verbose) cout << "Generating CPU reference solution..." << endl;
         matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
@@ -283,7 +203,6 @@ int main(int argc, char *argv[]) {
         if (verbose) cout << "Skipping CPU reference solution (no-check mode)..." << endl;
     }
 
-    // Run selected kernels
     int passed = 0;
     int total = kernel_choices.size();
 
@@ -291,8 +210,8 @@ int main(int argc, char *argv[]) {
         bool result = run_single_kernel(kernel_choice, rows, cols, inners,
                                        d_A, d_B, d_C, h_C, h_C_ref, runs, 
                                        verbose, check_results);
-        if (result || !check_results) passed++; // Count as passed if not checking results
-        
+        if (result || !check_results) passed++;
+
         if (!verbose) {
             cout << "Kernel " << kernel_choice << " (" << get_kernel_name(kernel_choice) << "): ";
             if (check_results) {
@@ -302,7 +221,7 @@ int main(int argc, char *argv[]) {
             }
             cout << endl;
         }
-        
+
         if (verbose && kernel_choice != kernel_choices.back()) {
             cout << endl;
         }
@@ -315,7 +234,6 @@ int main(int argc, char *argv[]) {
         cout << "completed (no verification)" << endl;
     }
 
-    // Clean up memory
     free(h_A);
     free(h_B);
     free(h_C);

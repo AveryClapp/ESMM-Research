@@ -1,16 +1,83 @@
 #pragma once
 
-#ifndef UTILS_CUH
-#define UTILS_CUH
 #include <cuda_runtime.h>
 #include <vector>
 #include <iostream>
+#include <sstream>
 #include <string>
 #define CEIL_DIV(M, N) (((M) + (N) - 1) / (N))
 #define PATTERN_LENGTH 8
 
 using std::cout;
 using std::endl;
+
+std::vector<int> parse_kernel_selection(const std::string& input) {
+    std::vector<int> kernels;
+    if (input == "all") {
+        for (int i = 1; i <= 13; i++) {
+            kernels.push_back(i);
+        }
+        return kernels;
+    }
+    size_t dash_pos = input.find('-');
+    if (dash_pos != std::string::npos) {
+        int start = std::stoi(input.substr(0, dash_pos));
+        int end = std::stoi(input.substr(dash_pos + 1));
+        for (int i = start; i <= end && i <= 13; i++) {
+            kernels.push_back(i);
+        }
+        return kernels;
+    }
+    std::stringstream ss(input);
+    std::string kernel_str;
+    while (std::getline(ss, kernel_str, ',')) {
+        int kernel = std::stoi(kernel_str);
+        if (kernel >= 1 && kernel <= 13) {
+            kernels.push_back(kernel);
+        }
+    }
+    return kernels;
+}
+
+const char* get_kernel_name(int kernel_choice) {
+    switch (kernel_choice) {
+        case 1: return "Naive Implementation";
+        case 2: return "Global Memory Coalescing";
+        case 3: return "Shared Memory Blocks";
+        case 4: return "One Dimensional Blocktiling";
+        case 5: return "Two Dimensional Blocktiling";
+        case 6: return "Vectorized Memory Accessing";
+        case 7: return "1D Vectorized Approach";
+        case 8: return "Basic Warptiling";
+        case 9: return "1D Warptiling";
+        case 10: return "Emergent Sparsity Matrix Multiplication (ESMM)";
+        case 11: return "ESMM Warpskipping";
+        case 12: return "ESMM Buffered";
+        case 13: return "cuBLAS";
+        default: return "Unknown Kernel";
+    }
+}
+
+void print_usage(const char* program_name) {
+    cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
+    cout << "  kernel_choice: " << endl;
+    cout << "    Single kernel: 1-13 (run specific kernel)" << endl;
+    cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
+    cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
+    cout << "    All: \"all\" (run all kernels 1-13)" << endl;
+    cout << "  runs: number of runs per kernel (default: 1)" << endl;
+    cout << "  Options:" << endl;
+    cout << "    --verbose, -v: Enable verbose output" << endl;
+    cout << "    --no-check, -n: Skip result verification (performance-only mode)" << endl;
+    cout << "    --check-results, -c: Enable result verification (default)" << endl;
+    cout << "    --help, -h: Show this help message" << endl;
+    cout << endl;
+    cout << "Examples:" << endl;
+    cout << "  " << program_name << " 6 10 --verbose --no-check" << endl;
+    cout << "  " << program_name << " 1-5 1 --check-results" << endl;
+    cout << "  " << program_name << " all 1 -v -n" << endl;
+}
+
 
 #define cudaCheckError(ans)                                                    \
   {                                                                            \
@@ -178,4 +245,3 @@ __forceinline__ __device__ void multiply_eighth(int wSubRowIdx, int wSubColIdx,
 	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
 }
 
-#endif

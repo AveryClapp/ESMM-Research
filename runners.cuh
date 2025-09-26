@@ -1,4 +1,5 @@
 #pragma once
+#include "utils.cuh"
 #include "./old_kernels/1D_Blocktiling.cu"
 #include "./old_kernels/2D_Blocktiling.cu"
 #include "./old_kernels/basic.cu"
@@ -12,7 +13,6 @@
 #include "./esmm_warpskipping.cu"
 #include "./old_kernels/esmm_buffered.cu"
 #include "./old_kernels/1D_vec.cu"
-#include "utils.cuh"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>

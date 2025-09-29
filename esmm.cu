@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
@@ -85,8 +86,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	float regM[WMITER * TM] = {0.0};
 	float regN[WNITER * TN] = {0.0};
 
-	for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		for (uint offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
+		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
 			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
@@ -94,14 +95,14 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
 			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
 		}
-		for (uint offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
-			reinterpret_cast<float4 *>( 
+		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+			reinterpret_cast<float4 *>(
 				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
 				reinterpret_cast<const float4 *>(
 					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
-		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
+		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];
@@ -129,7 +130,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				if (regM[wSubRowIdx] == 0)
 					continue;
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					/* switch_table; */
+					/* switch_table */
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
 					regM[wSubRowIdx], regN, threadResults);
 				}
@@ -139,6 +140,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		B += BK * N;
 		__syncthreads();
 	}
+
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;

@@ -132,18 +132,14 @@ int main(int argc, char *argv[]) {
     int runs = 1;
     bool verbose = false;
     bool check_results = true;
-    cout << argc << "\n";
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-
-        cout << arg << "\n";
         if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
         } else if (arg == "--no-check" || arg == "-n") {
-            cout << "Here\n";
             check_results = false;
         } else if (i == 1) {
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
@@ -180,7 +176,7 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    std::vector<int> sparsity = stringToVector("10000111");
+    std::vector<int> sparsity = stringToVector("00001111");
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);

@@ -63,7 +63,6 @@ The codebase incorporates insights from cutting-edge research:
 - **Pattern-based Sparsity**: 8-bit pattern recognition and kernel specialization
 
 ## Current Work:
-Experiment 1: Run the A-sparsity checks on a warp subtile that is 32 down.
 Experiment 2: While loop with no conditional checks and a list that stores non-zero values to be computed on that the warp computes and then returns. W/o diverging threads
 
 ## TODOs: 

@@ -109,7 +109,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			}
 			/* Load 8 values into the register, can adjust this based on sparsity too?*/
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				regN[wSubColIdx * TN + 0]= Bs[(dotIdx * BN) + warpCol * 
+				regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol * 
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
 				regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * 
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
@@ -127,8 +127,10 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
 			}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				if (regM[wSubRowIdx] == 0)
+				int32_t actives = __ballot_sync(0xFFFFFFFF, regM[wSubRowIdx] > 0);
+				if (!__popc(actives)) {
 					continue;
+				}
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					/* switch_table */
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,

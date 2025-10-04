@@ -1,6 +1,6 @@
 #pragma once
 
-/* Experimental imporvement to skip warps entirely given a precomputed sparsity index */
+/* Experimental approach to work queue an entire warp */
 
 #include <algorithm>
 #include <cassert>

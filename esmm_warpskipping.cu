@@ -79,28 +79,15 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				for (uint inner = 0; inner < WSUBM; ++inner) {
-					/* Have the first thread load its A-value */
-					float cur_val = 0.0f;
-					if ((threadIdx.x & 31) == 0) {
-						cur_val = As[dotIdx * BM + warpRow * WM + wSubRowIdx * WSUBM
-							+ threadRowInWarp + inner];
+				if (__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx] == 0) == 0xFFFFFFFF) continue;
+				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+					for (uint i = 0; i < TN; ++i) {
+						regN[wSubColIdx * TN + i] = 
+							Bs[dotIdx * BN + warpCol * WN + wSubColIdx 
+								* WSUBN + threadColInWarp * TN + i];
 					}
-					unsigned active_threads = __activemask();
-					/* Broadcast the A-value to all other threads in the warp */
-					float a_val = __shfl_sync(active_threads, cur_val, 0);
-					/* All threads will skip if the A-value is 0 for thread 0 */
-					if (a_val == 0)
-						continue;
-					for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-						for (uint i = 0; i < TN; ++i) {
-							regN[wSubColIdx * TN + i] = 
-								Bs[dotIdx * BN + warpCol * WN + wSubColIdx 
-									* WSUBN + threadColInWarp * TN + i];
-						}
-						multiply_dense(wSubRowIdx, wSubColIdx, WNITER, 
-										a_val, regN, threadResults);
-					}
+					multiply_dense(wSubRowIdx, wSubColIdx, WNITER, 
+									a_val, regN, threadResults);
 				}
 			}
 		}

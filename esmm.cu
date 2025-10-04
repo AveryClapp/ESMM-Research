@@ -127,10 +127,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
 			}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				int32_t actives = __ballot_sync(0xFFFFFFFF, regM[wSubRowIdx] > 0);
-				if (!__popc(actives)) {
-					continue;
-				}
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					/* switch_table */
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,

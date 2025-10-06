@@ -79,15 +79,16 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 		for (uint dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				if (__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx] == 0) == 0xFFFFFFFF) continue;
+				//if (__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx] == 0) == 0xFFFFFFFF) continue;
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 					for (uint i = 0; i < TN; ++i) {
 						regN[wSubColIdx * TN + i] = 
 							Bs[dotIdx * BN + warpCol * WN + wSubColIdx 
 								* WSUBN + threadColInWarp * TN + i];
 					}
-					multiply_dense(wSubRowIdx, wSubColIdx, WNITER, 
+				/*	multiply_dense(wSubRowIdx, wSubColIdx, WNITER, 
 									a_val, regN, threadResults);
+									*/
 				}
 			}
 		}

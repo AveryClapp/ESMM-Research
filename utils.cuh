@@ -14,7 +14,7 @@ using std::endl;
 std::vector<int> parse_kernel_selection(const std::string& input) {
     std::vector<int> kernels;
     if (input == "all") {
-        for (int i = 1; i <= 13; i++) {
+        for (int i = 1; i <= 14; i++) {
             kernels.push_back(i);
         }
         return kernels;
@@ -53,7 +53,8 @@ const char* get_kernel_name(int kernel_choice) {
         case 10: return "Emergent Sparsity Matrix Multiplication (ESMM)";
         case 11: return "ESMM Warpskipping";
         case 12: return "ESMM Buffered";
-        case 13: return "cuBLAS";
+        case 13: return "ESMM Offsets";
+        case 14: return "cuBLAS";
         default: return "Unknown Kernel";
     }
 }
@@ -61,10 +62,10 @@ const char* get_kernel_name(int kernel_choice) {
 void print_usage(const char* program_name) {
     cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
     cout << "  kernel_choice: " << endl;
-    cout << "    Single kernel: 1-13 (run specific kernel)" << endl;
+    cout << "    Single kernel: 1-14 (run specific kernel)" << endl;
     cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
     cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-    cout << "    All: \"all\" (run all kernels 1-13)" << endl;
+    cout << "    All: \"all\" (run all kernels 1-14)" << endl;
     cout << "  runs: number of runs per kernel (default: 1)" << endl;
     cout << "  Options:" << endl;
     cout << "    --verbose, -v: Enable verbose output" << endl;
@@ -118,7 +119,7 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 
 
 void randomize_matrix_with_pattern(float *mat, int M, int N,
-                  std::vector<int> pattern) {
+                  std::string_view pattern) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
       int pattern_idx = (i * N + j) % PATTERN_LENGTH;
@@ -199,6 +200,28 @@ bool verifyResults(const float *gpuResults, const float *cpuResults, int size,
   }
 
   return true;
+}
+
+std::vector<int> computeExpandedIndices(std::string_view pattern, int BK) {
+    std::vector<int> indices;
+    int patternSize = pattern.size();
+    int numRepetitions = BK / patternSize;
+
+    std::vector<int> patternIndices;
+    for (int i = 0; i < patternSize; i++) {
+        if (pattern[i] == '1') {
+            patternIndices.push_back(i);
+        }
+    }
+
+    // Repeat the pattern indices
+    for (int rep = 0; rep < numRepetitions; rep++) {
+        for (int idx : patternIndices) {
+            indices.push_back(idx);
+        }
+    }
+
+    return indices;
 }
 
 __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,

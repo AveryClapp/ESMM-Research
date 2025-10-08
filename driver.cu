@@ -97,7 +97,14 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_buffered_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 13: // cuBlas
+    case 13: // Experimental offset based A-Sparsity approach to ESMM
+        if (check_results) {
+            res = run_esmm_offsets(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_offsets_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 14: // cuBlas
         if (check_results) {
             run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
         } else {
@@ -176,7 +183,7 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    std::vector<int> sparsity = stringToVector("10101010");
+    constexpr std::string_view sparsity = "10101010"s;
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);

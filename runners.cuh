@@ -9,14 +9,16 @@
 #include "./old_kernels/warptiling.cu"
 #include "./old_kernels/1d_warptiling.cu"
 #include "./old_kernels/1d_warptiling_tm.cu"
-#include "./esmm.cu"
-#include "./esmm_warpskipping.cu"
+#include "./old_kernels/esmm_warpskipping.cu"
 #include "./old_kernels/esmm_buffered.cu"
 #include "./old_kernels/1D_vec.cu"
+#include "./esmm.cu"
+#include "./esmm_offsets.cu"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <string_view>
 
 // ============================================================================
 // PERFORMANCE-ONLY FUNCTIONS (NO RESULT CHECKING)
@@ -276,6 +278,40 @@ bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
     printf("CUDA error: %s\n", cudaGetErrorString(error));
   }
   
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  return verifyResults(h_C, h_C_ref, rows * cols);
+}
+
+bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs, 
+                    std::string_view pattern) {
+  const uint K10_NUM_THREADS = 256;
+  const uint K10_BN = 128;
+  const uint K10_BM = 128;
+  const uint K10_BK = 16;
+  const uint K10_WN = 64;
+  const uint K10_WM = 32;
+  const uint K10_WNITER = 4;
+  const uint K10_TN = 8;
+  const uint K10_TM = 1;
+
+  dim3 blockDim(K10_NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  /* Build list based on sparsity string */
+  auto sparsity_list = computeExpandedIndices(pattern, bk);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_offsets<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  }
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
+
   cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
   return verifyResults(h_C, h_C_ref, rows * cols);
 }

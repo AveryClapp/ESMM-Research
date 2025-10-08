@@ -285,25 +285,30 @@ bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
 bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs, 
                     std::string_view pattern) {
-  const uint K10_NUM_THREADS = 256;
-  const uint K10_BN = 128;
-  const uint K10_BM = 128;
-  const uint K10_BK = 16;
-  const uint K10_WN = 64;
-  const uint K10_WM = 32;
-  const uint K10_WNITER = 4;
-  const uint K10_TN = 8;
-  const uint K10_TM = 1;
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 16;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
 
-  dim3 blockDim(K10_NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   /* Build list based on sparsity string */
-  auto sparsity_list = computeExpandedIndices(pattern, bk);
+  auto sparsity_list = computeExpandedIndices(pattern, BK);
+  int* sparse_data;
+  int size = sparsity_list.size();
+
+  cudaMalloc(&sparse_data, size * sizeof(int));
+  cudaMemcpy(sparse_data, sparsity_list.data(), size * sizeof(int), cudaMemcpyHostToDevice);
 
   for (int i = 0; i < runs; i++) {
-    esmm_offsets<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data, size);
   }
   cudaDeviceSynchronize();
 
@@ -503,3 +508,35 @@ void run_cuBlas_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasDestroy(handle);
 }
 
+bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
+                          float *d_B, float *d_C, int runs, 
+                          std::string_view pattern) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 16;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  /* Build list based on sparsity string */
+  auto sparsity_list = computeExpandedIndices(pattern, BK);
+  int* sparse_data;
+  int size = sparsity_list.size();
+
+  cudaMalloc(&sparse_data, size * sizeof(int));
+  cudaMemcpy(sparse_data, sparsity_list.data(), size * sizeof(int), cudaMemcpyHostToDevice);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data, size);
+  }
+  cudaDeviceSynchronize();
+
+  return true;
+}

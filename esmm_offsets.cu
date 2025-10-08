@@ -1,6 +1,6 @@
 #pragma once
 
-/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
+/* Kernel #12, Warptiling (break blocks down even further by controlling warps) */
 
 #include "utils.cuh"
 #include <algorithm>
@@ -12,31 +12,6 @@
 #include <cuda_runtime.h>
 
 //#include <unrolled_kernels.cuh>
-
-/* How should this work?
-   We calculate the pattern in here?
-       Slow, this is not the solution since we will be shuffling
-	   sparsity anyways beforehand
-   We know sparsity beforehand and just run the switch statement 
- 	   How would this work?
-*/
-/*
-__device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-		
-	switch (sparsity) {
-		case 0:
-			break;
-		case 1:
-		case 255:
-
-	}
-
-}
-*/
 
 /*
  * @tparam BM The threadblock size for M dimension SMEM caching.
@@ -52,7 +27,7 @@ __device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	esmm(int M, int N, int K, float *A, float *B, float *C) {
+	esmm_offsets(int M, int N, int K, float *A, float *B, float *C, int* sparse_data, int size) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
@@ -102,15 +77,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
-		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
-		if (As[dotIdx * BM] == 0) {
-			continue;
-		}
+		for (int sparse_idx = 0; sparse_idx < size; ++sparse_idx) {
+			int dotIdx = sparse_data[sparse_idx];
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];
 			}
-			/* Load 8 values into the register, can adjust this based on sparsity too?*/
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 				regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol * 
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];

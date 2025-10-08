@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <string_view>
 
 using std::cout;
 using std::endl;
@@ -18,7 +19,7 @@ using std::cin;
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners, 
                       float* d_A, float* d_B, float* d_C, 
                       float* h_C, float* h_C_ref, int runs, 
-                      bool verbose, bool check_results) {
+                      bool verbose, bool check_results, std::string_view pattern) {
     bool res = false;
 
     // Reset d_C to zeros before each kernel
@@ -99,9 +100,9 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         break;
     case 13: // Experimental offset based A-Sparsity approach to ESMM
         if (check_results) {
-            res = run_esmm_offsets(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+            res = run_esmm_offsets(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, pattern);
         } else {
-            res = run_esmm_offsets_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+            res = run_esmm_offsets_no_check(rows, cols, inners, d_A, d_B, d_C, runs, pattern);
         }
         break;
     case 14: // cuBlas
@@ -183,7 +184,7 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    constexpr std::string_view sparsity = "10101010"s;
+    constexpr std::string_view sparsity = "10101010";
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);
@@ -212,7 +213,7 @@ int main(int argc, char *argv[]) {
     for (int kernel_choice : kernel_choices) {
         bool result = run_single_kernel(kernel_choice, rows, cols, inners,
                                        d_A, d_B, d_C, h_C, h_C_ref, runs, 
-                                       verbose, check_results);
+                                       verbose, check_results, sparsity);
         if (result || !check_results) passed++;
 
         if (!verbose) {

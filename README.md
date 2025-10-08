@@ -63,7 +63,8 @@ The codebase incorporates insights from cutting-edge research:
 - **Pattern-based Sparsity**: 8-bit pattern recognition and kernel specialization
 
 ## Current Work:
-Experiment 2: While loop with no conditional checks and a list that stores non-zero values to be computed on that the warp computes and then returns. W/o diverging threads
+Experiment 1: Known-sized offset list for A threads;
+Experiment 2: Brute force unrolled kernels?
 
 ## TODOs: 
 - [ ] [KernelTuner](https://github.com/KernelTuner/kernel_tuner) Verification

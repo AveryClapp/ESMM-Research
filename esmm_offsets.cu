@@ -23,6 +23,7 @@
  * @tparam WNITER The number of subwarp tiling steps in N dimension.
  * @tparam TM The per-thread tile size for M dimension.
  * @tparam TN The per-thread tile size for N dimension.
+ * @tparam SIZE The number of active A elements in an 8 block section.
  */
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS, const int SIZE>

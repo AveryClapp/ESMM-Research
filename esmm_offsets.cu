@@ -25,9 +25,9 @@
  * @tparam TN The per-thread tile size for N dimension.
  */
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
-		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
+		const int WNITER, const int TM, const int TN, const int NUM_THREADS, const int size>
 __global__ void __launch_bounds__(NUM_THREADS)
-	esmm_offsets(int M, int N, int K, float *A, float *B, float *C, int* sparse_data, int size) {
+	esmm_offsets(int M, int N, int K, float *A, float *B, float *C, int* sparse_data) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
@@ -77,7 +77,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
+		#pragma unroll
 		for (int sparse_idx = 0; sparse_idx < size; ++sparse_idx) {
+			// Load A index into register
 			int dotIdx = sparse_data[sparse_idx];
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
@@ -103,7 +105,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					/* switch_table */
+					/* switch_table here*/
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
 					regM[wSubRowIdx], regN, threadResults);
 				}

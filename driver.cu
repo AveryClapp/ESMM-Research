@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    constexpr std::string_view sparsity = "10101010";
+    constexpr std::string_view sparsity = "11111111";
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);

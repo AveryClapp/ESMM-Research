@@ -300,16 +300,39 @@ bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   /* Build list based on sparsity string */
-  auto sparsity_list = computeExpandedIndices(pattern, BK);
+  auto sparsity_list = computeExpandedIndices(pattern);
   int* sparse_data;
-  int size = sparsity_list.size();
+  const int SIZE = sparsity_list.size();
 
-  cudaMalloc(&sparse_data, size * sizeof(int));
-  cudaMemcpy(sparse_data, sparsity_list.data(), size * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMalloc(&sparse_data, SIZE * sizeof(int));
+  cudaMemcpy(sparse_data, sparsity_list.data(), SIZE * sizeof(int), cudaMemcpyHostToDevice);
 
-  for (int i = 0; i < runs; i++) {
-    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data, size);
+  if (SIZE == 1) {
+    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 2) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 3) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 4) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 5) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 6) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 7) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 8) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   }
+
   cudaDeviceSynchronize();
 
   cudaError_t error = cudaGetLastError();
@@ -526,16 +549,39 @@ bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   /* Build list based on sparsity string */
-  auto sparsity_list = computeExpandedIndices(pattern, BK);
+  auto sparsity_list = computeExpandedIndices(pattern);
   int* sparse_data;
-  int size = sparsity_list.size();
+  const int SIZE = sparsity_list.size();
 
-  cudaMalloc(&sparse_data, size * sizeof(int));
-  cudaMemcpy(sparse_data, sparsity_list.data(), size * sizeof(int), cudaMemcpyHostToDevice);
-
-  for (int i = 0; i < runs; i++) {
-    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data, size);
+  cudaMalloc(&sparse_data, SIZE * sizeof(int));
+  cudaMemcpy(sparse_data, sparsity_list.data(), SIZE * sizeof(int), cudaMemcpyHostToDevice);
+  if (SIZE == 1) {
+    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 2) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 3) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 4) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 5) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 6) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 7) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+  } else if (SIZE == 8) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   }
+
+
   cudaDeviceSynchronize();
 
   return true;

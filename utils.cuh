@@ -202,22 +202,14 @@ bool verifyResults(const float *gpuResults, const float *cpuResults, int size,
   return true;
 }
 
-std::vector<int> computeExpandedIndices(std::string_view pattern, int BK) {
+std::vector<int> computeExpandedIndices(std::string_view pattern) {
     std::vector<int> indices;
     int patternSize = pattern.size();
-    int numRepetitions = BK / patternSize;
 
     std::vector<int> patternIndices;
     for (int i = 0; i < patternSize; i++) {
         if (pattern[i] == '1') {
-            patternIndices.push_back(i);
-        }
-    }
-
-    // Repeat the pattern indices
-    for (int rep = 0; rep < numRepetitions; rep++) {
-        for (int idx : patternIndices) {
-            indices.push_back(idx);
+            indices.push_back(i);
         }
     }
 

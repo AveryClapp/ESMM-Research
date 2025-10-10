@@ -103,9 +103,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		}
 		__syncthreads();
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
-		if (As[dotIdx * BM] == 0) {
-			continue;
-		}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];

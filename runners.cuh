@@ -272,12 +272,12 @@ bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
     esmm_buffered<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
   }
   cudaDeviceSynchronize();
-  
+
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) {
     printf("CUDA error: %s\n", cudaGetErrorString(error));
   }
-  
+
   cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
   return verifyResults(h_C, h_C_ref, rows * cols);
 }

@@ -131,9 +131,9 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 
 int main(int argc, char *argv[]) {
     // Define Matrix Dims
-    constexpr int rows = 1024;
-    constexpr int cols = 1024;
-    constexpr int inners = 1024;
+    constexpr int rows = 4096;
+    constexpr int cols = 4096;
+    constexpr int inners = 4096;
 
     // Default values
     std::vector<int> kernel_choices = {10};
@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    constexpr std::string_view sparsity = "11111111";
+    constexpr std::string_view sparsity = "00000010";
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);

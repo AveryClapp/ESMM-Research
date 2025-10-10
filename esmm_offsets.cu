@@ -81,8 +81,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		#pragma unroll
 		for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
 			#pragma unroll
-			for (int i = 1; i <= 2; ++i) { 
-				int dotIdx = sparse_data[sparse_idx];
+			for (int i = 0; i < 2; ++i) { 
+				int dotIdx = sparse_data[sparse_idx] + (8 * i);
 				for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 					regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 						wSubRowIdx * WSUBM + threadRowInWarp * TM];
@@ -124,7 +124,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
-			for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
+			for (uint resIdxM = 0; resIdxM < TM; ++resIdxM) {
 				for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
 					float4 tmp;
 					const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +

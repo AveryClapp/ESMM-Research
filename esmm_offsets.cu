@@ -63,6 +63,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
 			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;

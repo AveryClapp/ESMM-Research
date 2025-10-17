@@ -63,13 +63,7 @@ The codebase incorporates insights from cutting-edge research:
 - **Pattern-based Sparsity**: 8-bit pattern recognition and kernel specialization
 
 ## Current Work:
-Experiment 1: Known-sized offset list for A threads;
-Experiment 2: Brute force unrolled kernels?
+1. Get data for A and B sparsity combined
+1. Get list overhead by unrolling kernels
 
-## TODOs: 
-- [ ] [KernelTuner](https://github.com/KernelTuner/kernel_tuner) Verification
-- [ ] Padding to avoid bank conflicts (need to check our current relationship with bank conflicts)
-- [ ] Take a look at the [PIT Paper](https://arxiv.org/pdf/2301.10936)
-- [ ] Generate 256 kernels
-- [ ] Tuple (Offset, Value) for A-Sparsity??
-- [ ] Build Switch Table
+

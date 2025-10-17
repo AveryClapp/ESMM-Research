@@ -231,6 +231,19 @@ __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
 	threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
 }
 
+__forceinline__ __device__ void multiply_threefourths(int wSubRowIdx, int wSubColIdx,
+								int WNITER, float regM_val, float* regN,
+										float* threadResults) {
+	const int regNBase = wSubColIdx * 8;
+	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
+	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
+	threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
+	threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
+	threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
+	threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];
+}
+
  __forceinline__ __device__ void multiply_half(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {

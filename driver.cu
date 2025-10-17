@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
     constexpr int inners = 4096;
 
     // Default values
-    std::vector<int> kernel_choices = {10};
+    std::vector<int> kernel_choices = {13};
     int runs = 1;
     bool verbose = false;
     bool check_results = true;
@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    constexpr std::string_view sparsity = "00000010";
+    constexpr std::string_view sparsity = "11000000";
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);

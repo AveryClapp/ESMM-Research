@@ -57,13 +57,13 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	const uint innerColB = threadIdx.x % (BN / 4);
 	constexpr uint rowStrideB = NUM_THREADS / (BN / 4);
 
+
 	float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 	float regM[WMITER * TM] = {0.0};
 	float regN[WNITER * TN] = {0.0};
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
-
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
 			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
@@ -78,42 +78,37 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
-
 		#pragma unroll
 		for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
+			int dotIdx = sparse_data[sparse_idx];
+			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+					wSubRowIdx * WSUBM + threadRowInWarp * TM];
+			}
+			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+				regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
+				regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
+				regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
+				regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
+				regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
+				regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
+				regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
+				regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+			}
 			#pragma unroll
-			for (int i = 0; i < 2; ++i) { 
-				int dotIdx = sparse_data[sparse_idx] + (8 * i);
-				for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-					regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
-						wSubRowIdx * WSUBM + threadRowInWarp * TM];
-				}
+			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-					regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-					regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-					regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-					regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-					regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-					regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-					regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
-				}
-				#pragma unroll
-				for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-					#pragma unrol
-					for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-						/* switch_table here*/
-						multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-						regM[wSubRowIdx], regN, threadResults);
-					}
+					/* switch_table here*/
+					multiply_quarter(wSubRowIdx, wSubColIdx, WNITER,
+					regM[wSubRowIdx], regN, threadResults);
 				}
 			}
 		}

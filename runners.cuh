@@ -537,7 +537,7 @@ bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
   const uint NUM_THREADS = 256;
   const uint BN = 128;
   const uint BM = 128;
-  const uint BK = 16;
+  const uint BK = 8;
   const uint WN = 64;
   const uint WM = 32;
   const uint WNITER = 4;

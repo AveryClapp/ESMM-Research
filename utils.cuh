@@ -23,7 +23,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
     if (dash_pos != std::string::npos) {
         int start = std::stoi(input.substr(0, dash_pos));
         int end = std::stoi(input.substr(dash_pos + 1));
-        for (int i = start; i <= end && i <= 13; i++) {
+        for (int i = start; i <= end && i <= 14; i++) {
             kernels.push_back(i);
         }
         return kernels;
@@ -32,7 +32,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
     std::string kernel_str;
     while (std::getline(ss, kernel_str, ',')) {
         int kernel = std::stoi(kernel_str);
-        if (kernel >= 1 && kernel <= 13) {
+        if (kernel >= 1 && kernel <= 14) {
             kernels.push_back(kernel);
         }
     }

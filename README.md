@@ -14,8 +14,8 @@ Detailed walkthrough of our current kernel [here](https://github.com/AveryClapp/
 ├── runners.cuh                  # Kernel wrapper functions and execution logic
 ├── utils.cuh                    # Utility functions, error handling, and matrix generation
 ├── esmm.cu                      # Main ESMM (Efficient Sparse Matrix Multiplication) kernel
-├── esmm_offsets.cu		           # ESMM with A sparsity encoded in a list
-├── esmm_unrolled/		           # Collection of kernels with hardcoded A Sparsity optimizations
+├── esmm_offsets.cu		         # ESMM with A sparsity encoded in a list
+├── esmm_unrolled/		         # Collection of kernels with hardcoded A Sparsity optimizations
 ├── old_kernels/                 # Progressive kernel development hierarchy
 ├── images/                      # Architecture diagrams and visualizations
 └── KernelWalkthrough.md         # Detailed implementation explanation

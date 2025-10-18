@@ -14,6 +14,11 @@
 #include "./old_kernels/1D_vec.cu"
 #include "./esmm.cu"
 #include "./esmm_offsets.cu"
+#include "./esmm_unrolled/esmm_unrolled_8.cu"
+#include "./esmm_unrolled/esmm_unrolled_6.cu"
+#include "./esmm_unrolled/esmm_unrolled_4.cu"
+#include "./esmm_unrolled/esmm_unrolled_2.cu"
+#include "./esmm_unrolled/esmm_unrolled_1.cu"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -344,6 +349,55 @@ bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
   return verifyResults(h_C, h_C_ref, rows * cols);
 }
 
+bool run_esmm_unrolled(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, float *h_C, float *h_C_ref, int runs, 
+                    std::string_view pattern) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  /* Build list based on sparsity string */
+  auto sparsity_list = computeExpandedIndices(pattern);
+  const int SIZE = sparsity_list.size();
+
+  if (SIZE == 1) {
+      esmm_unrolled_1<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 2) {
+      esmm_unrolled_2<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 4) {
+      esmm_unrolled_4<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 6) {
+      esmm_unrolled_6<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 8) {
+      esmm_unrolled_8<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  return verifyResults(h_C, h_C_ref, rows * cols);
+}
+
 void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
                  float *d_C, float *h_C, int runs) {
   cublasHandle_t handle;
@@ -586,3 +640,46 @@ bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
 
   return true;
 }
+
+bool run_esmm_unrolled_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
+                    float *d_C, int runs, 
+                    std::string_view pattern) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  /* Build list based on sparsity string */
+  auto sparsity_list = computeExpandedIndices(pattern);
+  const int SIZE = sparsity_list.size();
+
+  if (SIZE == 1) {
+      esmm_unrolled_1<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 2) {
+      esmm_unrolled_2<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 4) {
+      esmm_unrolled_4<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 6) {
+      esmm_unrolled_6<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  } else if (SIZE == 8) {
+      esmm_unrolled_8<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+  }
+
+  cudaDeviceSynchronize();
+  return true;
+}
+

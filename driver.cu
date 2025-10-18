@@ -105,7 +105,14 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_offsets_no_check(rows, cols, inners, d_A, d_B, d_C, runs, pattern);
         }
         break;
-    case 14: // cuBlas
+    case 14: // Experimental offset based A-Sparsity approach to ESMM
+        if (check_results) {
+            res = run_esmm_unrolled(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, pattern);
+        } else {
+            res = run_esmm_unrolled_no_check(rows, cols, inners, d_A, d_B, d_C, runs, pattern);
+        }
+        break;
+    case 15: // cuBlas
         if (check_results) {
             run_cuBlas(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
         } else {
@@ -131,9 +138,9 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 
 int main(int argc, char *argv[]) {
     // Define Matrix Dims
-    constexpr int rows = 4096;
-    constexpr int cols = 4096;
-    constexpr int inners = 4096;
+    constexpr int rows = 1024;
+    constexpr int cols = 1024;
+    constexpr int inners = 1024;
 
     // Default values
     std::vector<int> kernel_choices = {13};

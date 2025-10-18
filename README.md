@@ -63,7 +63,6 @@ The codebase incorporates insights from cutting-edge research:
 - **Pattern-based Sparsity**: 8-bit pattern recognition and kernel specialization
 
 ## Current Work:
-1. Get data for A and B sparsity combined
 1. Get list overhead by unrolling kernels
 
 

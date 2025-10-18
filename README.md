@@ -14,7 +14,8 @@ Detailed walkthrough of our current kernel [here](https://github.com/AveryClapp/
 ├── runners.cuh                  # Kernel wrapper functions and execution logic
 ├── utils.cuh                    # Utility functions, error handling, and matrix generation
 ├── esmm.cu                      # Main ESMM (Efficient Sparse Matrix Multiplication) kernel
-├── esmm_warpskipping.cu         # ESMM with warp-level sparsity optimization
+├── esmm_offsets.cu		 # ESMM with A sparsity encoded in a list
+├── esmm_unrolled/		 # Collection of kernels with hardcoded A Sparsity optimizations
 ├── old_kernels/                 # Progressive kernel development hierarchy
 ├── images/                      # Architecture diagrams and visualizations
 └── KernelWalkthrough.md        # Detailed implementation explanation
@@ -49,20 +50,14 @@ The `old_kernels/` directory implements a systematic optimization progression:
 5. **Advanced Tiling** (`2D_Blocktiling.cu`): 2D register blocking for compute intensity
 6. **Vectorization** (`vectorized_blocktiling.cu`): SIMD memory operations
 7. **Warp Specialization** (`warptiling.cu`): Warp-level cooperative computation
+8. **Warp Skipping** (`esmm_warpskipping.cu`): First attempt at taking advantage of A Sparsity on a warp-level
+9. **Double Buffering** (`esmm_buffered.cu`): Experimental approach to ping-ponging memory and compute loads
 
 ### **Sparse Kernels**
 - **ESMM** (`esmm.cu`): Main sparse kernel with pattern detection
-- **Warp Skipping** (`esmm_warpskipping.cu`): Dynamic warp-level sparsity optimization
-- **Double Buffering** (`esmm_buffered.cu`): Experimental approach to ping-ponging memory and compute loads
-
-## Research Integration
-
-The codebase incorporates insights from cutting-edge research:
-- **PIT Framework**: Permutation Invariant Transformation for dynamic sparsity
-- **Micro-tile Optimization**: GPU-efficient sparse computation patterns  
-- **Pattern-based Sparsity**: 8-bit pattern recognition and kernel specialization
+- **ESMM List Offsets** (`esmm_offsets.cu`): Derivative of main sparse kernel that uses a preloaded list for A-sparisty
+- **ESMM Unrolled Offsets** (`esmm_unrolled/`): Collection of various unrolled kernels to test list overhead on A-Sparsity
 
 ## Current Work:
-1. Get list overhead by unrolling kernels
-
+1. Determine the dispatch process
 

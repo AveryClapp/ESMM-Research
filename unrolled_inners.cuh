@@ -1,5 +1,8 @@
 #pragma once
 
+#define NUM_LOOPS 256
+using UnrolledLoop = void (*)(int, int, int, float, float*, float*);
+
 // Auto-generated sparsity pattern kernels
 // Each kernel handles a specific 8-bit sparsity pattern (0x00 to 0xFF)
 // Bit i (LSB=0) indicates whether element i should be processed
@@ -3070,6 +3073,81 @@ __forceinline__ __device__ void multiply_pattern_255(int wSubRowIdx, int wSubCol
 	threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
 }
 
-#endif // SPARSITY_KERNELS_CUH
+__device__ MultiplyKernelFunc multiply_dispatch[NUM_LOOPS] = {
+	multiply_pattern_0, 	multiply_pattern_1, 	multiply_pattern_2, 	multiply_pattern_3,
+	multiply_pattern_4, 	multiply_pattern_5, 	multiply_pattern_6, 	multiply_pattern_7,
+	multiply_pattern_8, 	multiply_pattern_9, 	multiply_pattern_10, 	multiply_pattern_11,
+	multiply_pattern_12, 	multiply_pattern_13, 	multiply_pattern_14, 	multiply_pattern_15,
+	multiply_pattern_16, 	multiply_pattern_17, 	multiply_pattern_18, 	multiply_pattern_19,
+	multiply_pattern_20, 	multiply_pattern_21, 	multiply_pattern_22, 	multiply_pattern_23,
+	multiply_pattern_24, 	multiply_pattern_25, 	multiply_pattern_26, 	multiply_pattern_27,
+	multiply_pattern_28, 	multiply_pattern_29, 	multiply_pattern_30, 	multiply_pattern_31,
+	multiply_pattern_32, 	multiply_pattern_33, 	multiply_pattern_34, 	multiply_pattern_35,
+	multiply_pattern_36, 	multiply_pattern_37, 	multiply_pattern_38, 	multiply_pattern_39,
+	multiply_pattern_40, 	multiply_pattern_41, 	multiply_pattern_42, 	multiply_pattern_43,
+	multiply_pattern_44, 	multiply_pattern_45, 	multiply_pattern_46, 	multiply_pattern_47,
+	multiply_pattern_48, 	multiply_pattern_49, 	multiply_pattern_50, 	multiply_pattern_51,
+	multiply_pattern_52, 	multiply_pattern_53, 	multiply_pattern_54, 	multiply_pattern_55,
+	multiply_pattern_56, 	multiply_pattern_57, 	multiply_pattern_58, 	multiply_pattern_59,
+	multiply_pattern_60, 	multiply_pattern_61, 	multiply_pattern_62, 	multiply_pattern_63,
+	multiply_pattern_64, 	multiply_pattern_65, 	multiply_pattern_66, 	multiply_pattern_67,
+	multiply_pattern_68, 	multiply_pattern_69, 	multiply_pattern_70, 	multiply_pattern_71,
+	multiply_pattern_72, 	multiply_pattern_73, 	multiply_pattern_74, 	multiply_pattern_75,
+	multiply_pattern_76, 	multiply_pattern_77, 	multiply_pattern_78, 	multiply_pattern_79,
+	multiply_pattern_80, 	multiply_pattern_81, 	multiply_pattern_82, 	multiply_pattern_83,
+	multiply_pattern_84, 	multiply_pattern_85, 	multiply_pattern_86, 	multiply_pattern_87,
+	multiply_pattern_88, 	multiply_pattern_89, 	multiply_pattern_90, 	multiply_pattern_91,
+	multiply_pattern_92, 	multiply_pattern_93, 	multiply_pattern_94, 	multiply_pattern_95,
+	multiply_pattern_96, 	multiply_pattern_97, 	multiply_pattern_98, 	multiply_pattern_99,
+	multiply_pattern_100, 	multiply_pattern_101, 	multiply_pattern_102, 	multiply_pattern_103,
+	multiply_pattern_104, 	multiply_pattern_105, 	multiply_pattern_106, 	multiply_pattern_107,
+	multiply_pattern_108, 	multiply_pattern_109, 	multiply_pattern_110, 	multiply_pattern_111,
+	multiply_pattern_112, 	multiply_pattern_113, 	multiply_pattern_114, 	multiply_pattern_115,
+	multiply_pattern_116, 	multiply_pattern_117, 	multiply_pattern_118, 	multiply_pattern_119,
+	multiply_pattern_120, 	multiply_pattern_121, 	multiply_pattern_122, 	multiply_pattern_123,
+	multiply_pattern_124, 	multiply_pattern_125, 	multiply_pattern_126, 	multiply_pattern_127,
+	multiply_pattern_128, 	multiply_pattern_129, 	multiply_pattern_130, 	multiply_pattern_131,
+	multiply_pattern_132, 	multiply_pattern_133, 	multiply_pattern_134, 	multiply_pattern_135,
+	multiply_pattern_136, 	multiply_pattern_137, 	multiply_pattern_138, 	multiply_pattern_139,
+	multiply_pattern_140, 	multiply_pattern_141, 	multiply_pattern_142, 	multiply_pattern_143,
+	multiply_pattern_144, 	multiply_pattern_145, 	multiply_pattern_146, 	multiply_pattern_147,
+	multiply_pattern_148, 	multiply_pattern_149, 	multiply_pattern_150, 	multiply_pattern_151,
+	multiply_pattern_152, 	multiply_pattern_153, 	multiply_pattern_154, 	multiply_pattern_155,
+	multiply_pattern_156, 	multiply_pattern_157, 	multiply_pattern_158, 	multiply_pattern_159,
+	multiply_pattern_160, 	multiply_pattern_161, 	multiply_pattern_162, 	multiply_pattern_163,
+	multiply_pattern_164, 	multiply_pattern_165, 	multiply_pattern_166, 	multiply_pattern_167,
+	multiply_pattern_168, 	multiply_pattern_169, 	multiply_pattern_170, 	multiply_pattern_171,
+	multiply_pattern_172, 	multiply_pattern_173, 	multiply_pattern_174, 	multiply_pattern_175,
+	multiply_pattern_176, 	multiply_pattern_177, 	multiply_pattern_178, 	multiply_pattern_179,
+	multiply_pattern_180, 	multiply_pattern_181, 	multiply_pattern_182, 	multiply_pattern_183,
+	multiply_pattern_184, 	multiply_pattern_185, 	multiply_pattern_186, 	multiply_pattern_187,
+	multiply_pattern_188, 	multiply_pattern_189, 	multiply_pattern_190, 	multiply_pattern_191,
+	multiply_pattern_192, 	multiply_pattern_193, 	multiply_pattern_194, 	multiply_pattern_195,
+	multiply_pattern_196, 	multiply_pattern_197, 	multiply_pattern_198, 	multiply_pattern_199,
+	multiply_pattern_200, 	multiply_pattern_201, 	multiply_pattern_202, 	multiply_pattern_203,
+	multiply_pattern_204, 	multiply_pattern_205, 	multiply_pattern_206, 	multiply_pattern_207,
+	multiply_pattern_208, 	multiply_pattern_209, 	multiply_pattern_210, 	multiply_pattern_211,
+	multiply_pattern_212, 	multiply_pattern_213, 	multiply_pattern_214, 	multiply_pattern_215,
+	multiply_pattern_216, 	multiply_pattern_217, 	multiply_pattern_218, 	multiply_pattern_219,
+	multiply_pattern_220, 	multiply_pattern_221, 	multiply_pattern_222, 	multiply_pattern_223,
+	multiply_pattern_224, 	multiply_pattern_225, 	multiply_pattern_226, 	multiply_pattern_227,
+	multiply_pattern_228, 	multiply_pattern_229, 	multiply_pattern_230, 	multiply_pattern_231,
+	multiply_pattern_232, 	multiply_pattern_233, 	multiply_pattern_234, 	multiply_pattern_235,
+	multiply_pattern_236, 	multiply_pattern_237, 	multiply_pattern_238, 	multiply_pattern_239,
+	multiply_pattern_240, 	multiply_pattern_241, 	multiply_pattern_242, 	multiply_pattern_243,
+	multiply_pattern_244, 	multiply_pattern_245, 	multiply_pattern_246, 	multiply_pattern_247,
+	multiply_pattern_248, 	multiply_pattern_249, 	multiply_pattern_250, 	multiply_pattern_251,
+	multiply_pattern_252, 	multiply_pattern_253, 	multiply_pattern_254, 	multiply_pattern_255
+};
 
+// Inline wrapper for dispatching to the correct kernel
+__forceinline__ __device__ void multiply_sparse(
+		uint8_t sparsity_pattern,
+		int wSubRowIdx, int wSubColIdx,
+		int WNITER, float regM_val, float* regN,
+		float* threadResults) {
+	multiply_dispatch[sparsity_pattern](
+			wSubRowIdx, wSubColIdx, WNITER,
+			regM_val, regN, threadResults);
+}
 

@@ -59,6 +59,7 @@ The `old_kernels/` directory implements a systematic optimization progression:
 - **ESMM Unrolled Offsets** (`esmm_unrolled/`): Collection of various unrolled kernels to test list overhead on A-Sparsity
 
 ## Current Work:
+1. Build out A Preprocessing step
 1. Investigate improvement dropoff at high sparsity levels
 1. Experiment w/ the dispatch process
 

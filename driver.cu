@@ -138,9 +138,9 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 
 int main(int argc, char *argv[]) {
     // Define Matrix Dims
-    constexpr int rows = 1024;
-    constexpr int cols = 1024;
-    constexpr int inners = 1024;
+    constexpr int rows = 4096;
+    constexpr int cols = 4096;
+    constexpr int inners = 4096;
 
     // Default values
     std::vector<int> kernel_choices = {13};

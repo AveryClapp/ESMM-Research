@@ -2,6 +2,8 @@
 
 /* Preprocessor for A matrix to encode horizontal sparsity */
 
+#define MAX_DENSE 5 
+
 #include "utils.cuh"
 #include <cuda_runtime.h>
 
@@ -42,21 +44,33 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		}
 
 		__syncthreads();
-		__shared__ int A_cols[BK * WMITER];
+
+		__shared__ int8_t denseList[BK * WMITER];
+		int laneId = threadIdx.x % WARPSIZE;
+		int denseCounts = 0;
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			short cts = 0;
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp];
 			}
 
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				uint32_t ballot = __ballot_sync(0xFFFFFFFF, regM[wSubRowIdx]);
-				int isDense = (ballot != 0);
-				denseList[idx] = (dotIdx << 2) | wSubRowIdx;
-				denseCount += isDense & -(laneId == 0);
-				idx += isDense;
-			}
+			// Unrolling this for bit packing
+			short active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[0]) > 0);
+			denseList[dotIdx] = active * dotIdx;
+			denseCount += active & -(laneId == 0);
+
+			active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[1]) > 0);
+			denseList[1 * BK + dotIdx] = active * dotIdx;
+			denseCount += active & -(laneId == 0);
+
+			active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[2]) > 0);
+			denseList[2 * BK + dotIdx] = active * dotIdx;
+			denseCount += active & -(laneId == 0);
+
+			active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[3]) > 0);
+			denseList[3 * BK + dotIdx] = active * dotIdx;
+			denseCount += active & -(laneId == 0);
+
 		}
 		A += BK;
 		__syncthreads();

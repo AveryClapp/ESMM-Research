@@ -217,6 +217,93 @@ std::vector<int> computeExpandedIndices(std::string_view pattern) {
     return indices;
 }
 
+void computeReferencePreprocessing(float* A, float* h_ALIST_ref, int rows, int cols, 
+                                   int BM, int BK, int WMITER, int WSUBM) {
+    const int numKBlocks = cols / BK;
+    const int numBlockRows = rows / BM;
+    const int MAX_SPARSE_OFFSETS = BK / 2;
+
+    // For each block
+    for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+
+            // For each sub-row within the block
+            for (int subRow = 0; subRow < WMITER; subRow++) {
+
+                int count = 0;
+                int8_t offsets[BK];
+
+                // Check each dotIdx (column within K-block)
+                for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
+                    bool hasNonZero = false;
+
+                    // Check all 32 rows in this sub-row block
+                    for (int threadRow = 0; threadRow < 32; threadRow++) {
+                        int globalRow = blockRow * BM + subRow * WSUBM + threadRow;
+                        int globalCol = kBlock * BK + dotIdx;
+
+                        if (A[globalRow * cols + globalCol] != 0.0f) {
+                            hasNonZero = true;
+                            break;
+                        }
+                    }
+
+                    if (hasNonZero) {
+                        if (count < MAX_SPARSE_OFFSETS) {
+                            offsets[count] = dotIdx;
+                        }
+                        count++;
+                    }
+                }
+
+                const int blockBase = blockRow * numKBlocks * (BK * WMITER + WMITER);
+                const int kBlockBase = blockBase + kBlock * (BK * WMITER + WMITER);
+                const int subRowBase = kBlockBase + subRow * (1 + BK);
+
+                int8_t* ref = (int8_t*)h_ALIST_ref;
+
+                if (count > MAX_SPARSE_OFFSETS) {
+                    ref[subRowBase] = -1;  // Dense marker
+                } else {
+                    ref[subRowBase] = count;
+                    for (int i = 0; i < count; i++) {
+                        ref[subRowBase + 1 + i] = offsets[i];
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool verifyPreprocessResults(float* h_ALIST, float* h_ALIST_ref, int totalSize) {
+    int8_t* gpu = (int8_t*)h_ALIST;
+    int8_t* cpu = (int8_t*)h_ALIST_ref;
+
+    bool allMatch = true;
+    int errorCount = 0;
+    const int MAX_ERRORS_TO_PRINT = 10;
+    for (int i = 0; i < totalSize; i++) {
+        if (gpu[i] != cpu[i]) {
+            if (errorCount < MAX_ERRORS_TO_PRINT) {
+                printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
+                       i, (int)gpu[i], (int)cpu[i]);
+            }
+            errorCount++;
+            allMatch = false;
+        }
+    }
+    if (allMatch) {
+        printf("✓ VERIFICATION PASSED - All values match!\n");
+    } else {
+        printf("✗ VERIFICATION FAILED - %d mismatches found\n", errorCount);
+        if (errorCount > MAX_ERRORS_TO_PRINT) {
+            printf("  (showing first %d errors)\n", MAX_ERRORS_TO_PRINT);
+        }
+    }
+    return allMatch;
+}
+
+//TODO: Replace these with unrolled loops file
 __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
 								int WNITER, float regM_val, float* regN,
 										float* threadResults) {

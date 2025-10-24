@@ -19,6 +19,8 @@
 #include "./esmm_unrolled/esmm_unrolled_4.cu"
 #include "./esmm_unrolled/esmm_unrolled_2.cu"
 #include "./esmm_unrolled/esmm_unrolled_1.cu"
+#include "./preprocessors/a_preprocessor.cu"
+#include "./preprocessors/b_preprocessor.cu"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -415,6 +417,51 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasDestroy(handle);
 }
 
+bool run_a_preprocess(int rows, int cols, int inners, float *d_A,
+                         float *d_ALIST, float *h_ALIST, float *h_ALIST_ref, int runs) {
+    const uint NUM_THREADS = 256;
+    const uint BN = 128;
+    const uint BM = 128;
+    const uint BK = 8;
+    const uint WN = 64;
+    const uint WM = 32;
+    const uint WNITER = 4;
+    const uint TN = 8;
+    const uint TM = 1;
+
+    constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+    constexpr uint WSUBM = WM / WMITER;
+
+    const int denseListSize = (inners / BK) * (BK * WMITER + WMITER);
+    const int numBlocks = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BN);
+    const int totalSize = numBlocks * denseListSize;
+   
+    dim3 blockDim(NUM_THREADS);
+    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+    float* h_A = (float*)malloc(rows * inners * sizeof(float));
+    cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
+    computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
+    free(h_A);
+
+    cudaMemset(d_A_LIST, 0, totalSize);
+
+    for (int i = 0; i < runs; i++) {
+        preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
+    }
+    cudaDeviceSynchronize();
+
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(error));
+    }
+
+    cudaMemcpy(h_ALIST, d_ALIST, totalSize, cudaMemcpyDeviceToHost);
+    return verifyPreprocessResults(h_ALIST, h_ALIST_ref, totalSize);
+
+}
+
 // ============================================================================
 // PERFORMANCE-ONLY VERSIONS (NO RESULT CHECKING)
 // ============================================================================
@@ -683,3 +730,28 @@ bool run_esmm_unrolled_no_check(int rows, int cols, int inners, float *d_A, floa
   return true;
 }
 
+bool run_a_preprocess_no_check(int rows, int cols, int inners, float *d_A,
+                         float *d_ALIST,int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_A_LIST, 0, rows * cols * sizeof(float));
+
+  for (int i = 0; i < runs; i++) {
+    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
+  }
+  cudaDeviceSynchronize();
+
+  return true;
+
+}

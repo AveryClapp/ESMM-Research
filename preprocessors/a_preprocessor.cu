@@ -21,17 +21,23 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 	constexpr uint WSUBM = WM / WMITER;
 
+	// Target 50% or lower sparsity
+	constexpr uint MAX_SPARSE_OFFSETS = BK / 2;
+
 	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
 	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 
 	__shared__ float As[BN * BK];
+	// Enough space to encode BK + 1 elements for each 32x8 block
+	__shared__ int8_t denseList[(K / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
 
 	A += cRow * BM * K;
 
 	const uint innerRowA = threadIdx.x / (BK / 4);
 	const uint innerColA = threadIdx.x % (BK / 4);
 	constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
+	
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
@@ -45,37 +51,36 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 		__syncthreads();
 
-		__shared__ int8_t denseList[BK * WMITER];
 		int laneId = threadIdx.x % WARPSIZE;
-		int denseCounts = 0;
+		// Traverse 32x8 blocks and accumulate sparsity
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp];
 			}
+			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+				short active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx]) > 0);
+				if (active && laneId == 0) {
+					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);
+					const uint countIdx = kBlockBase + wSubRowIdx * (1 + BK);
+					uint8_t currentCount = denseList[countIdx];
+					if (currentCount < MAX_SPARSE_OFFSETS) {
+						const uint offsetIdx = countIdx + 1 + currentCount;
+						denseList[offsetIdx] = dotIdx;
+						denseList[countIdx]++;
+					} else {
+						denseList[countIdx] = -1;
+						break;
 
-			// Unrolling this for bit packing
-			short active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[0]) > 0);
-			denseList[dotIdx] = active * dotIdx;
-			denseCount += active & -(laneId == 0);
-
-			active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[1]) > 0);
-			denseList[1 * BK + dotIdx] = active * dotIdx;
-			denseCount += active & -(laneId == 0);
-
-			active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[2]) > 0);
-			denseList[2 * BK + dotIdx] = active * dotIdx;
-			denseCount += active & -(laneId == 0);
-
-			active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[3]) > 0);
-			denseList[3 * BK + dotIdx] = active * dotIdx;
-			denseCount += active & -(laneId == 0);
-
+					}
+				}
+			}
 		}
 		A += BK;
 		__syncthreads();
 	}
 
+	// TODO:
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;

@@ -2,11 +2,10 @@
 
 /* Preprocessor for A matrix to encode horizontal sparsity */
 
-#include "utils.cuh"
+#include "../utils.cuh"
 #include <cuda_runtime.h>
 
-template <const int BM, const int BN, const int BK, const int WM, const int WN,
-		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
+template <const int BM, const int BN, const int BK, const int WM, const int WN, const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
 	preprocess_A(int M, int N, int K, float *A, int* A_LIST) {
 	const uint cRow = blockIdx.y;
@@ -19,17 +18,18 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 	constexpr uint WSUBM = WM / WMITER;
+	constexpr uint WSUBN = WN / WNITER;
 
 	// Target 50% or lower sparsity
 	constexpr uint MAX_SPARSE_OFFSETS = BK / 2;
 
 	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
-	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 
 	__shared__ float As[BN * BK];
 	// Enough space to encode BK + 1 elements for each 32x8 block
 	__shared__ int8_t denseList[(K / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
+	float regM[WMITER * TM] = {0.0};
 
 	A += cRow * BM * K;
 
@@ -83,8 +83,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeFloat4;
 
-	float4* denseListVec = reinterpret_cast<int4*>(denseList);
-	float4* A_LIST_Vec = reinterpret_cast<int4*>(A_LIST);
+	int4* denseListVec = reinterpret_cast<int4*>(denseList);
+	int4* A_LIST_Vec = reinterpret_cast<int4*>(A_LIST);
 
 	for (uint i = threadIdx.x; i < denseListSizeFloat4; i += blockDim.x) {
 		A_LIST_Vec[blockOffset + i] = denseListVec[i];

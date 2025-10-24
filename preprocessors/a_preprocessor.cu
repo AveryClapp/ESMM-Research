@@ -2,17 +2,16 @@
 
 /* Preprocessor for A matrix to encode horizontal sparsity */
 
-#define MAX_DENSE 5 
-
 #include "utils.cuh"
 #include <cuda_runtime.h>
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	preprocess_A(int M, int N, int K, float *A, int *A_CTS, int* A_LIST) {
+	preprocess_A(int M, int N, int K, float *A, int* A_LIST) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
+	const uint laneId = threadIdx.x % WARPSIZE;
 
 	const uint warpIdx = threadIdx.x / WARPSIZE;
 	const uint warpCol = warpIdx % (BN / WN);
@@ -51,7 +50,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 		__syncthreads();
 
-		int laneId = threadIdx.x % WARPSIZE;
 		// Traverse 32x8 blocks and accumulate sparsity
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
@@ -80,25 +78,16 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 	}
 
-	// TODO:
-	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
-			for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
-				for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
-					float4 tmp;
-					const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
-						wSubColIdx * TN + resIdxN;
-					tmp.x = threadResults[i + 0];
-					tmp.y = threadResults[i + 1];
-					tmp.z = threadResults[i + 2];
-					tmp.w = threadResults[i + 3];
-					reinterpret_cast<float4 *>(
-						&C_interim[(threadRowInWarp * TM + resIdxM) * N +
-						threadColInWarp * TN + resIdxN])[0] = tmp;
-				}
-			}
-		}	
-	}		
+	const uint denseListSize = (K/BK) * (BK * WMITER + WMITER);
+	const uint denseListSizeFloat4 = (denseListSize + 15) / 16;
+
+	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeFloat4;
+
+	float4* denseListVec = reinterpret_cast<int4*>(denseList);
+	float4* A_LIST_Vec = reinterpret_cast<int4*>(A_LIST);
+
+	for (uint i = threadIdx.x; i < denseListSizeFloat4; i += blockDim.x) {
+		A_LIST_Vec[blockOffset + i] = denseListVec[i];
+	}
 }
 

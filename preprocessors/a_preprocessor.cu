@@ -27,7 +27,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	__shared__ float As[BN * BK];
 	// Enough space to encode BK + 1 elements for each 32x8 block
-	__shared__ int8_t denseList[(inners / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
+	__shared__ int denseList[(inners / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
 	float regM[WMITER * TM] = {0.0};
 
 	A += cRow * BM * K;
@@ -60,15 +60,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				if (active && laneId == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);
 					const uint countIdx = kBlockBase + wSubRowIdx * (1 + BK);
-					uint8_t currentCount = denseList[countIdx];
+					uint8_t currentCount = atomicAdd(&denseList[countIdx], 1);
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						const uint offsetIdx = countIdx + 1 + currentCount;
 						denseList[offsetIdx] = dotIdx;
-						denseList[countIdx]++;
 					} else {
 						denseList[countIdx] = -1;
-						break;
-
 					}
 				}
 			}
@@ -77,8 +74,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 	}
 
-	const uint denseListSize = (K/BK) * (BK * WMITER + WMITER);
-	const uint denseListSizeFloat4 = (denseListSize + 15) / 16;
+	const uint denseListSize = (inners/BK) * (BK * WMITER + WMITER);
+	const uint denseListSizeFloat4 = (denseListSize + 3) / 4;
 
 	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeFloat4;
 

@@ -775,7 +775,7 @@ PreprocessResult preprocess_matrix_a(float* d_A, int rows, int cols, int inners)
     result.h_list = nullptr;
 
     // Allocate device memory
-    cudaCheckError(cudaMalloc((void**)&result.d_list, totalSize));
+    cudaCheckError(cudaMalloc((void**)&result.d_list, totalSize * sizeof(int)));
     cudaCheckError(cudaMemset(result.d_list, 0, totalSize));
 
     // Run preprocessing kernel
@@ -802,8 +802,8 @@ bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs) {
 
     PreprocessResult result = preprocess_matrix_a(d_A, rows, inners, inners);
 
-    result.h_list = (int*)malloc(result.totalSize);
-    int* h_ALIST_ref = (int*)malloc(result.totalSize);
+    result.h_list = (int*)malloc(result.totalSize * sizeof(int));
+    int* h_ALIST_ref = (int*)malloc(result.totalSize * sizeof(int));
 
     cudaMemcpy(result.h_list, result.d_list, result.totalSize, cudaMemcpyDeviceToHost);
 

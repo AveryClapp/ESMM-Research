@@ -27,7 +27,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	__shared__ float As[BN * BK];
 	// Enough space to encode BK + 1 elements for each 32x8 block
-	__shared__ int denseList[(inners / BK) * (BK * WMITER + (WMITER))];
+	__shared__ int denseList[(inners / BK) * (BK * WMITER + WMITER)];
 	float regM[WMITER * TM] = {0.0};
 
 	A += cRow * BM * K;
@@ -64,7 +64,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						const uint offsetIdx = countIdx + 1 + currentCount;
 						denseList[offsetIdx] = dotIdx;
-						denseList[countIdx] = atomicAdd(&denseList[countIdx], 1);
+						++denseList[countIdx];
 					} else {
 						denseList[countIdx] = -1;
 						break;

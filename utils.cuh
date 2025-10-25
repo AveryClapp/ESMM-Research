@@ -235,8 +235,7 @@ std::vector<int> computeExpandedIndices(std::string_view pattern) {
   return indices;
 }
 
-void computeReferencePreprocessing(float* A, float* h_ALIST_ref, int rows, int cols, 
-    int BM, int BK, int WMITER, int WSUBM) {
+void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int cols,  int BM, int BK, int WMITER, int WSUBM) {
   const int numKBlocks = cols / BK;
   const int numBlockRows = rows / BM;
   const int MAX_SPARSE_OFFSETS = BK / 2;
@@ -293,7 +292,7 @@ void computeReferencePreprocessing(float* A, float* h_ALIST_ref, int rows, int c
   }
 }
 
-bool verifyPreprocessResults(float* h_ALIST, float* h_ALIST_ref, int totalSize) {
+bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   int8_t* gpu = (int8_t*)h_ALIST;
   int8_t* cpu = (int8_t*)h_ALIST_ref;
 
@@ -331,12 +330,12 @@ bool handle_preprocessing_commands(int argc, char** argv) {
   }
 
   int size = (argc >= 3) ? atoi(argv[2]) : 1024;
-  int runs = (argc >= 4) ? atoi(argv[3]) : 10;
+  int runs = (argc >= 4) ? atoi(argv[3]) : 1;
   bool success = false;
 
   if (arg == "0a" || arg == "--preprocess-a") {
     printf("=== A Matrix Preprocessing Verification ===\n");
-    printf("Size: %dx%d, Runs: %d\n\n", size, size, runs);
+    printf("Size: %dx%d", size, size);
 
     // Setup test matrix
     float *d_A;

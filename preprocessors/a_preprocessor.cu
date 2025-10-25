@@ -13,13 +13,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	const uint laneId = threadIdx.x % WARPSIZE;
 
 	const uint warpIdx = threadIdx.x / WARPSIZE;
-	const uint warpCol = warpIdx % (BN / WN);
 	const uint warpRow = warpIdx / (BN / WN);
 
 	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 	constexpr uint WSUBM = WM / WMITER;
 	constexpr uint WSUBN = WN / WNITER;
-
+	constexpr uint inners = 1024;
 	// Target 50% or lower sparsity
 	constexpr uint MAX_SPARSE_OFFSETS = BK / 2;
 
@@ -28,7 +27,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	__shared__ float As[BN * BK];
 	// Enough space to encode BK + 1 elements for each 32x8 block
-	__shared__ int8_t denseList[(K / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
+	__shared__ int8_t denseList[(inners / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
 	float regM[WMITER * TM] = {0.0};
 
 	A += cRow * BM * K;

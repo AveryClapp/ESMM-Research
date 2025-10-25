@@ -418,7 +418,7 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 }
 
 bool run_a_preprocess(int rows, int cols, int inners, float *d_A,
-                         float *d_ALIST, int *h_ALIST, int *h_ALIST_ref, int runs) {
+                         int *d_ALIST, int *h_ALIST, int *h_ALIST_ref, int runs) {
     const uint NUM_THREADS = 256;
     const uint BN = 128;
     const uint BM = 128;
@@ -447,8 +447,7 @@ bool run_a_preprocess(int rows, int cols, int inners, float *d_A,
     cudaMemset(d_ALIST, 0, totalSize);
 
     for (int i = 0; i < runs; i++) {
-        preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
+        preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
     }
     cudaDeviceSynchronize();
 
@@ -731,7 +730,7 @@ bool run_esmm_unrolled_no_check(int rows, int cols, int inners, float *d_A, floa
 }
 
 bool run_a_preprocess_no_check(int rows, int cols, int inners, float *d_A,
-                         float *d_ALIST,int runs) {
+                         int *d_ALIST,int runs) {
   const uint NUM_THREADS = 256;
   const uint BN = 128;
   const uint BM = 128;
@@ -744,10 +743,10 @@ bool run_a_preprocess_no_check(int rows, int cols, int inners, float *d_A,
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_ALIST, 0, rows * cols * sizeof(float));
+  cudaMemset(d_ALIST, 0, rows * cols * sizeof(int));
 
   for (int i = 0; i < runs; i++) {
-    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
   }
   cudaDeviceSynchronize();
@@ -783,7 +782,7 @@ PreprocessResult preprocess_matrix_a(float* d_A, int rows, int cols, int inners)
     dim3 blockDim(NUM_THREADS);
     dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
 
-    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, result.d_list);
 
     cudaCheckError(cudaDeviceSynchronize());
@@ -800,34 +799,31 @@ void free_preprocess_result(PreprocessResult& result) {
 
 bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs) {
     const uint BM = 128, BK = 8, WMITER = 4, WSUBM = 32;
-    
-    printf("Computing CPU reference...\n");
-    
+
     PreprocessResult result = preprocess_matrix_a(d_A, rows, inners, inners);
-    
+
     result.h_list = (int*)malloc(result.totalSize);
-    float* h_ALIST_ref = (int*)malloc(result.totalSize);
-    
+    int* h_ALIST_ref = (int*)malloc(result.totalSize);
+
     cudaMemcpy(result.h_list, result.d_list, result.totalSize, cudaMemcpyDeviceToHost);
-    
+
     float* h_A = (float*)malloc(rows * inners * sizeof(float));
     cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
     computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
     free(h_A);
-    
+
     if (runs > 1) {
-        printf("Running GPU preprocessing %d times for timing...\n", runs);
         for (int i = 1; i < runs; i++) {
             cudaMemset(result.d_list, 0, result.totalSize);
             PreprocessResult temp = preprocess_matrix_a(d_A, rows, inners, inners);
             cudaFree(temp.d_list);
         }
     }
-    
+
     bool passed = verifyPreprocessResults(result.h_list, h_ALIST_ref, result.totalSize);
-    
+
     free(h_ALIST_ref);
     free_preprocess_result(result);
-    
+
     return passed;
 }

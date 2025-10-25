@@ -248,7 +248,7 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
       for (int subRow = 0; subRow < WMITER; subRow++) {
 
         int count = 0;
-        int8_t offsets[BK];
+        int offsets[BK];
 
         // Check each dotIdx (column within K-block)
         for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
@@ -277,14 +277,13 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
         const int kBlockBase = blockBase + kBlock * (BK * WMITER + WMITER);
         const int subRowBase = kBlockBase + subRow * (1 + BK);
 
-        int8_t* ref = (int8_t*)h_ALIST_ref;
 
         if (count > MAX_SPARSE_OFFSETS) {
-          ref[subRowBase] = -1;  // Dense marker
+          h_ALIST_ref[subRowBase] = -1;  // Dense marker
         } else {
-          ref[subRowBase] = count;
+          h_ALIST_ref[subRowBase] = count;
           for (int i = 0; i < count; i++) {
-            ref[subRowBase + 1 + i] = offsets[i];
+            h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
           }
         }
       }
@@ -293,8 +292,8 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
 }
 
 bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
-  int8_t* gpu = (int8_t*)h_ALIST;
-  int8_t* cpu = (int8_t*)h_ALIST_ref;
+  int* gpu = (int*)h_ALIST;
+  int* cpu = (int*)h_ALIST_ref;
 
   bool allMatch = true;
   int errorCount = 0;

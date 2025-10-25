@@ -27,7 +27,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	__shared__ float As[BN * BK];
 	// Enough space to encode BK + 1 elements for each 32x8 block
-	__shared__ int denseList[(inners / BK) * ((BK / 2) * WMITER + (1 * WMITER))];
+	__shared__ int denseList[(inners / BK) * (BK * WMITER + (WMITER))];
 	float regM[WMITER * TM] = {0.0};
 
 	A += cRow * BM * K;
@@ -56,16 +56,18 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					wSubRowIdx * WSUBM + threadRowInWarp];
 			}
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				short active = static_cast<short>(__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx]) > 0);
+				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx]) > 0);
 				if (active && laneId == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);
 					const uint countIdx = kBlockBase + wSubRowIdx * (1 + BK);
-					uint8_t currentCount = atomicAdd(&denseList[countIdx], 1);
+					int currentCount = denseList[countIdx];
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						const uint offsetIdx = countIdx + 1 + currentCount;
 						denseList[offsetIdx] = dotIdx;
+						denseList[countIdx] = atomicAdd(&denseList[countIdx], 1);
 					} else {
 						denseList[countIdx] = -1;
+						break;
 					}
 				}
 			}

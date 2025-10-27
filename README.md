@@ -68,7 +68,9 @@ The `old_kernels/` directory implements a systematic optimization progression:
 
 The high level view of the outer most loop of computation is pretty simple, it iterates across a row of A with an A tile of BM x BK and iterates down a column of B with a B tile of BK x BN. Once they have both advanced across/down their computation, a BM x BN block of C will be computed.
 
-![](./images/Outerloop.png)
+<div align="center">
+  <img src="./images/Outerloop.png" alt="Outer loop visualization">
+</div>
 
 Right now, the relevant code is:
 ```
@@ -104,7 +106,9 @@ const float4 tmp = reinterpret_cast<const float4 *>(
 ```
 This transposes the A tile as it gets the 4 elements from the start of the threads indexing and sets them equal to a flipped index in As ([row, col] -> [col,row]). Here is a picture of the entire process. 
 
-  ![](./images/SMEM-Loading.png)
+<div align="center">
+  <img src="./images/SMEM-Loading.png" alt="SMEM Loading visualization">
+</div>
 
 The B-SMEM loading process is simple: 
 ```
@@ -128,7 +132,9 @@ float regN[WNITER * TN] = {0.0};
 ```
 The next step of breaking down our original matrix into smaller chunks comes in separating blocks of BM x BN into multiple chunks of WM x WN:
 
-![](./images/Warptiling.png)
+<div align="center">
+  <img src="./images/Warptiling.png" alt="Warp tiling visualization">
+</div>
 
 This is done with the help of some smart index variables
 ```
@@ -146,7 +152,9 @@ const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 ```
 WMITER is determined by dividing the total elements in the warptile by the number of elements computed per iteration. WSUBM and WSUBN tell us the dimensions of the chunks broken up by WMITER and WNITER. The WSUBM x WSUBN chunks are finally broken up into chunks the size of TN x TM, which is where the last 3 variables are used to load elements into registerfiles.
 
-![](./images/warpsubtiles.png)
+<div align="center">
+  <img src="./images/warpsubtiles.png" alt="Warp subtiles visualization">
+</div>
 
 Now, at the finest-grained level we have a TM x TN chunk which is where we load into the register files. With TM = 1 in our kernel, loading into regM is simple:
 ```
@@ -166,12 +174,17 @@ for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 ```
 In both of these, the indexing works like this, find the row or column in the blocktile, find the warptile and find the column within the warptile, find where the thread should be in the warp and then start loading elements (1 for TM, 8 for TN). So now you have the 1x8 (TM x TN) segment that each thread does that completes the WSUBM x WSUBN matrix that is combined to complete the WM x WN matrix that combines to complete the blocktiling matrix which is done across the whole A and B matrices to compute the result.
 
-![](./images/tmxtx.png)
+<div align="center">
+  <img src="./images/tmxtx.png" alt="TM x TN visualization">
+</div>
 
 
 ### Inner Loop
 The inner loop goes over all WNITER tiles and runs a computation that accumulates results from the regN array that holds WNITER \* TN elements. For each grouping of TN elements it multiples against the corresponding element of A and accumulates values in the thread results array that will eventually write results to C.
-![](./images/Innerloop.png)
+
+<div align="center">
+  <img src="./images/Innerloop.png" alt="Inner loop visualization">
+</div>
 
 #### Writing Results Back
 At a glance, this looks complicated because there is a lot going on:

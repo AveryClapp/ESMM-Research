@@ -802,8 +802,8 @@ bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs) {
 
     PreprocessResult result = preprocess_matrix_a(d_A, rows, inners, inners);
 
-    result.h_list = (int*)malloc(result.totalSize * sizeof(int));
-    int* h_ALIST_ref = (int*)malloc(result.totalSize * sizeof(int));
+    result.h_list = (int*)calloc(result.totalSize, sizeof(int));
+    int* h_ALIST_ref = (int*)calloc(result.totalSize, sizeof(int));
 
     cudaMemcpy(result.h_list, result.d_list, result.totalSize, cudaMemcpyDeviceToHost);
 

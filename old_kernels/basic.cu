@@ -16,6 +16,6 @@ __global__ void basic(int rows, int cols, int inners, const float* A, const floa
 		for (int i = 0; i < inners; ++i) {
 			tmp += A[x * inners + i] * B[i * cols + y];
 		}
-		C[x * cols + y] = tmp * C[x * cols + y];
+		C[x * cols + y] = tmp;
 	}
 }

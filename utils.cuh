@@ -240,54 +240,36 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
   const int numBlockRows = rows / BM;
   const int MAX_SPARSE_OFFSETS = BK / 2;
 
-  // For each block
   for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-
-      // For each sub-row within the block
       for (int subRow = 0; subRow < WMITER; subRow++) {
-
         int count = 0;
-        int offsets[BK];
-
-        // Check each dotIdx (column within K-block)
+        int offsets[BK] = {0};
         for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
-          bool hasNonZero = false;
-
-          // Check all 32 rows in this sub-row block
           for (int threadRow = 0; threadRow < 32; threadRow++) {
             int globalRow = blockRow * BM + subRow * WSUBM + threadRow;
             int globalCol = kBlock * BK + dotIdx;
-
             if (A[globalRow * cols + globalCol] != 0.0f) {
-              hasNonZero = true;
-              break;
+              if (count < MAX_SPARSE_OFFSETS) {
+                offsets[count++] = dotIdx;
+                break;
+              } else {
+                count = -1;
+                break;
+              }
             }
           }
-
-          if (hasNonZero) {
-            if (count < MAX_SPARSE_OFFSETS) {
-              offsets[count] = dotIdx;
-            }
-            count++;
-          }
+          if (count == -1) break;
         }
-
         const int blockBase = blockRow * numKBlocks * (BK * WMITER + WMITER);
         const int kBlockBase = blockBase + kBlock * (BK * WMITER + WMITER);
         const int subRowBase = kBlockBase + subRow * (1 + BK);
-
-
-        if (count > MAX_SPARSE_OFFSETS) {
-          h_ALIST_ref[subRowBase] = -1;  // Dense marker
-        } else {
-          h_ALIST_ref[subRowBase] = count;
-          for (int i = 0; i < count; i++) {
-            h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
-          }
+        h_ALIST_ref[subRowBase] = count;
+        for (int i = 0; i < BK; i++) {
+          h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
         }
       }
-    }
+    } 
   }
 }
 
@@ -299,10 +281,13 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   int errorCount = 0;
   const int MAX_ERRORS_TO_PRINT = 10;
   for (int i = 0; i < totalSize; i++) {
+    if (i >= 9 && i < 28) {
+      printf("GPU=%d and CPU=%d at %d\n", gpu[i], cpu[i], i);
+    }
     if (gpu[i] != cpu[i]) {
       if (errorCount < MAX_ERRORS_TO_PRINT) {
         printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
-            i, (int)gpu[i], (int)cpu[i]);
+            i, gpu[i], cpu[i]);
       }
       errorCount++;
       allMatch = false;

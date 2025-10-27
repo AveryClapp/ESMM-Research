@@ -64,10 +64,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						const uint offsetIdx = countIdx + 1 + currentCount;
 						denseList[offsetIdx] = dotIdx;
-						++denseList[countIdx];
+						denseList[countIdx]++;
 					} else {
 						denseList[countIdx] = -1;
-						break;
 					}
 				}
 			}
@@ -77,6 +76,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	}
 
 	const uint denseListSize = (inners/BK) * (BK * WMITER + WMITER);
+	// CeilDiv size of dense list (should already be divisible by 4)
 	const uint denseListSizeFloat4 = (denseListSize + 3) / 4;
 
 	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeFloat4;

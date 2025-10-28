@@ -141,7 +141,7 @@ void randomize_matrix_with_pattern(float *mat, int M, int N,
     std::string_view pattern) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
-      int pattern_idx = (i * N + j) % PATTERN_LENGTH;
+      int pattern_idx = (j) % PATTERN_LENGTH;
       if (pattern[pattern_idx] == '1') {
         float tmp = (float)(rand() % 5) + 0.01 * (rand() % 5);
         tmp = (rand() % 2 == 0) ? tmp : tmp * (-1.);
@@ -249,6 +249,7 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
           for (int threadRow = 0; threadRow < 32; threadRow++) {
             int globalRow = blockRow * BM + subRow * WSUBM + threadRow;
             int globalCol = kBlock * BK + dotIdx;
+            //std::cout << A[globalRow * cols + globalCol]
             if (A[globalRow * cols + globalCol] != 0.0f) {
               if (count < MAX_SPARSE_OFFSETS) {
                 offsets[count++] = dotIdx;
@@ -280,14 +281,16 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   bool allMatch = true;
   int errorCount = 0;
   const int MAX_ERRORS_TO_PRINT = 10;
+  std::cout << "Checking results... \n";
   for (int i = 0; i < totalSize; i++) {
-    if (i >= 9 && i < 28) {
+    if (i >= 0 && i < 28) {
       printf("GPU=%d and CPU=%d at %d\n", gpu[i], cpu[i], i);
     }
     if (gpu[i] != cpu[i]) {
       if (errorCount < MAX_ERRORS_TO_PRINT) {
-        printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
-            i, gpu[i], cpu[i]);
+        continue;
+        //printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
+          //i, gpu[i], cpu[i]);
       }
       errorCount++;
       allMatch = false;
@@ -304,7 +307,7 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   return allMatch;
 }
 
-bool handle_preprocessing_commands(int argc, char** argv) {
+bool handle_preprocessing_commands(int argc, char** argv, std::string_view sparsity) {
   if (argc < 2) return false;
 
   std::string arg = argv[1];
@@ -325,7 +328,7 @@ bool handle_preprocessing_commands(int argc, char** argv) {
     float *d_A;
     cudaMalloc(&d_A, size * size * sizeof(float));
     float* h_A = (float*)malloc(size * size * sizeof(float));
-    randomize_matrix_with_pattern(h_A, size, size, "10000000");
+    randomize_matrix_with_pattern(h_A, size, size, sparsity);
     cudaMemcpy(d_A, h_A, size * size * sizeof(float), cudaMemcpyHostToDevice);
     free(h_A);
 

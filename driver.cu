@@ -137,11 +137,14 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 }
 
 int main(int argc, char *argv[]) {
-    handle_preprocessing_commands(argc, argv);
+
     // Define Matrix Dims
     constexpr int rows = 1024;
     constexpr int cols = 1024;
     constexpr int inners = 1024;
+    constexpr std::string_view sparsity = "11111111";
+
+    handle_preprocessing_commands(argc, argv, sparsity);
 
     // Default values
     std::vector<int> kernel_choices = {13};
@@ -192,7 +195,6 @@ int main(int argc, char *argv[]) {
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
-    constexpr std::string_view sparsity = "11000000";
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     randomize_matrix(h_B, inners, cols);

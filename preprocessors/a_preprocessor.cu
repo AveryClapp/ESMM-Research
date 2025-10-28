@@ -52,19 +52,15 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		// Traverse 32x8 blocks and accumulate sparsity
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
-					wSubRowIdx * WSUBM + threadRowInWarp];
-			}
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, regM[wSubRowIdx]) > 0);
+				int val = As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp];
+				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, val) != 0.0f);
 				if (active && laneId == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);
 					const uint countIdx = kBlockBase + wSubRowIdx * (1 + BK);
-					int currentCount = denseList[countIdx];
+					int currentCount = atomicAdd(&denseList[countIdx], 1);
 					if (currentCount < MAX_SPARSE_OFFSETS) {
-						const uint offsetIdx = countIdx + 1 + currentCount;
+						const uint offsetIdx = countIdx + currentCount + 1;
 						denseList[offsetIdx] = dotIdx;
-						denseList[countIdx]++;
 					} else {
 						denseList[countIdx] = -1;
 					}

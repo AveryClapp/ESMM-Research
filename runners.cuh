@@ -757,6 +757,7 @@ bool run_a_preprocess_no_check(int rows, int cols, int inners, float *d_A,
 
 
 PreprocessResult preprocess_matrix_a(float* d_A, int rows, int cols, int inners) {
+    constexpr int ELEMENTS_PER_PATTERN = 5;
     const uint NUM_THREADS = 256;
     const uint BN = 128, BM = 128, BK = 8;
     const uint WN = 64, WM = 32, WNITER = 4;
@@ -764,7 +765,7 @@ PreprocessResult preprocess_matrix_a(float* d_A, int rows, int cols, int inners)
 
     constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 
-    const int denseListSize = (inners / BK) * (BK * WMITER + WMITER);
+    const int denseListSize = (inners / BK) * WMITER * ELEMENTS_PER_PATTERN;
     const int numBlocks = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BN);
     const int totalSize = numBlocks * denseListSize;
 

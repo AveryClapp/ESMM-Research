@@ -18,23 +18,19 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	constexpr uint WSUBM = WM / WMITER;
 	constexpr uint WSUBN = WN / WNITER;
 	constexpr uint inners = 1024;
+	
 	// Target 50% or lower sparsity
 	constexpr uint MAX_SPARSE_OFFSETS = BK / 2;
+	constexpr uint ELEMENTS_PER_PATTERN = 5;
+	constexpr uint denseListSize = (inners/BK) * WMITER * ELEMENTS_PER_PATTERN;
 
 	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 
-	__shared__ float As[BN * BK];
-
-	// Enough space to encode BK + 1 elements for each 32x8 block
-	__shared__ int denseList[(inners / BK) * (BK * WMITER + WMITER)];
+	// Enough space to encode BK/2 + 1 elements for each 32x8 block
+	__shared__ int denseList[denseListSize];
 
 	A += cRow * BM * K;
-
-	const uint innerRowA = threadIdx.x / (BK / 4);
-	const uint innerColA = threadIdx.x % (BK / 4);
-	constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
-
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		// Traverse 32x8 blocks and accumulate sparsity
@@ -43,8 +39,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				int val = A[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM];
 				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, val) != 0.0f);
 				if (active && threadIdx.x == 0) {
-					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);
-					const uint countIdx = kBlockBase + wSubRowIdx * (1 + BK);
+					const uint kBlockBase = (bkIdx / BK) * (WMITER * ELEMENTS_PER_PATTERN);
+					const uint countIdx = kBlockBase + wSubRowIdx * ELEMENTS_PER_PATTERN;
 					int currentCount = atomicAdd(&denseList[countIdx], 1);
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						const uint offsetIdx = countIdx + currentCount + 1;
@@ -59,9 +55,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 	}
 
-	const uint denseListSize = (inners/BK) * (BK * WMITER + WMITER);
 	// CeilDiv size of dense list (should already be divisible by 4)
-	const uint denseListSizeFloat4 = (denseListSize + 3) / 4;
+	constexpr uint denseListSizeFloat4 = (denseListSize + 3) / 4;
 
 	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeFloat4;
 
@@ -72,4 +67,3 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		A_LIST_Vec[blockOffset + i] = denseListVec[i];
 	}
 }
-

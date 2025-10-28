@@ -239,17 +239,17 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
   const int numKBlocks = cols / BK;
   const int numBlockRows = rows / BM;
   const int MAX_SPARSE_OFFSETS = BK / 2;
+  const int ELEMENTS_PER_PATTERN = 1 + MAX_SPARSE_OFFSETS;
 
   for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
       for (int subRow = 0; subRow < WMITER; subRow++) {
         int count = 0;
-        int offsets[BK] = {0};
+        int offsets[MAX_SPARSE_OFFSETS] = {0};
         for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
           for (int threadRow = 0; threadRow < 32; threadRow++) {
             int globalRow = blockRow * BM + subRow * WSUBM + threadRow;
             int globalCol = kBlock * BK + dotIdx;
-            //std::cout << A[globalRow * cols + globalCol]
             if (A[globalRow * cols + globalCol] != 0.0f) {
               if (count < MAX_SPARSE_OFFSETS) {
                 offsets[count++] = dotIdx;
@@ -262,9 +262,9 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
           }
           if (count == -1) break;
         }
-        const int blockBase = blockRow * numKBlocks * (BK * WMITER + WMITER);
-        const int kBlockBase = blockBase + kBlock * (BK * WMITER + WMITER);
-        const int subRowBase = kBlockBase + subRow * (1 + BK);
+        const int blockBase = blockRow * numKBlocks * WMITER * ELEMENTS_PER_PATTERN;
+        const int kBlockBase = blockBase + kBlock * WMITER * ELEMENTS_PER_PATTERN;
+        const int subRowBase = kBlockBase + subRow * ELEMENTS_PER_PATTERN;
         h_ALIST_ref[subRowBase] = count;
         for (int i = 0; i < BK; i++) {
           h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
@@ -277,11 +277,16 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
 bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   int* gpu = (int*)h_ALIST;
   int* cpu = (int*)h_ALIST_ref;
+  std::cout << "\n" << totalSize << "\n";
 
   bool allMatch = true;
   int errorCount = 0;
   const int MAX_ERRORS_TO_PRINT = 10;
   for (int i = 0; i < totalSize; i++) {
+    if (i < 20) {
+    printf("At index %d: GPU=%d, CPU=%d\n", 
+          i, gpu[i], cpu[i]);
+    }
     if (gpu[i] != cpu[i]) {
       if (errorCount < MAX_ERRORS_TO_PRINT) {
         printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 

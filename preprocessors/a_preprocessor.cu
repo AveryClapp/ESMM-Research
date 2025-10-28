@@ -37,21 +37,10 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
-			const float4 tmp = reinterpret_cast<const float4 *>(
-				&A[(innerRowA + offset) * K + innerColA * 4])[0];
-			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-			As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
-		}
-
-		__syncthreads();
-
 		// Traverse 32x8 blocks and accumulate sparsity
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				int val = As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM];
+				int val = A[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM];
 				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, val) != 0.0f);
 				if (active && threadIdx.x == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);

@@ -319,7 +319,6 @@ bool handle_preprocessing_commands(int argc, char** argv, std::string_view spars
     printf("=== A Matrix Preprocessing Verification ===\n");
     printf("Size: %dx%d", size, size);
 
-    // Setup test matrix
     float *d_A;
     cudaMalloc(&d_A, size * size * sizeof(float));
     float* h_A = (float*)malloc(size * size * sizeof(float));
@@ -327,7 +326,6 @@ bool handle_preprocessing_commands(int argc, char** argv, std::string_view spars
     cudaMemcpy(d_A, h_A, size * size * sizeof(float), cudaMemcpyHostToDevice);
     free(h_A);
 
-    // Run verification (handles everything)
     success = verify_preprocess_a(d_A, size, size, size, runs);
 
     cudaFree(d_A);

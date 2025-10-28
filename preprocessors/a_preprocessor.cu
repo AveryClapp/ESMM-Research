@@ -10,7 +10,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	preprocess_A(int M, int N, int K, float *A, int* A_LIST) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
-	const uint laneId = threadIdx.x % WARPSIZE;
 
 	const uint warpIdx = threadIdx.x / WARPSIZE;
 	const uint warpRow = warpIdx / (BN / WN);
@@ -26,16 +25,16 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 
 	__shared__ float As[BN * BK];
+
 	// Enough space to encode BK + 1 elements for each 32x8 block
 	__shared__ int denseList[(inners / BK) * (BK * WMITER + WMITER)];
-	float regM[WMITER * TM] = {0.0};
 
 	A += cRow * BM * K;
 
 	const uint innerRowA = threadIdx.x / (BK / 4);
 	const uint innerColA = threadIdx.x % (BK / 4);
 	constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
-	
+
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
@@ -52,9 +51,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		// Traverse 32x8 blocks and accumulate sparsity
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				int val = As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp];
+				int val = As[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM];
 				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, val) != 0.0f);
-				if (active && laneId == 0) {
+				if (active && threadIdx.x == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (BK * WMITER + WMITER);
 					const uint countIdx = kBlockBase + wSubRowIdx * (1 + BK);
 					int currentCount = atomicAdd(&denseList[countIdx], 1);

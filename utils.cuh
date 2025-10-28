@@ -281,16 +281,11 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   bool allMatch = true;
   int errorCount = 0;
   const int MAX_ERRORS_TO_PRINT = 10;
-  std::cout << "Checking results... \n";
   for (int i = 0; i < totalSize; i++) {
-    if (i >= 0 && i < 28) {
-      printf("GPU=%d and CPU=%d at %d\n", gpu[i], cpu[i], i);
-    }
     if (gpu[i] != cpu[i]) {
       if (errorCount < MAX_ERRORS_TO_PRINT) {
-        continue;
-        //printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
-          //i, gpu[i], cpu[i]);
+        printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
+          i, gpu[i], cpu[i]);
       }
       errorCount++;
       allMatch = false;

@@ -58,7 +58,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	// CeilDiv size of dense list (should already be divisible by 4)
 	constexpr uint denseListSizeFloat4 = (denseListSize + 3) / 4;
 
-	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeFloat4;
+	const uint blockOffset = (cRow) * denseListSizeFloat4;
 
 	int4* denseListVec = reinterpret_cast<int4*>(denseList);
 	int4* A_LIST_Vec = reinterpret_cast<int4*>(A_LIST);

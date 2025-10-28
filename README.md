@@ -1,5 +1,4 @@
-# ESMM CUDA Programming
-This repository implements high-performance sparse matrix multiplication kernels using CUDA, with a focus on pattern-based sparsity optimization and warp-level acceleration techniques.
+# ESMM CUDA ProgrammingThis repository implements high-performance sparse matrix multiplication kernels using CUDA, with a focus on pattern-based sparsity optimization and warp-level acceleration techniques.
 
 ## Current Results/Experiments
 View current testing results [here](https://docs.google.com/spreadsheets/d/1l7kVnpowxioqy-BX4UVK34Vqc7DbwsiFNjKI8jKklxw/edit?usp=sharing)  
@@ -59,6 +58,7 @@ The `old_kernels/` directory implements a systematic optimization progression:
 
 ## Current Work:
 1. Build out A Preprocessing step
+	- Take a look at launch bounds and dimensions
 1. Investigate improvement dropoff at high sparsity levels
 1. Experiment w/ the dispatch process
 

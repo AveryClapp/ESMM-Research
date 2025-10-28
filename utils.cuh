@@ -277,16 +277,11 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
 bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   int* gpu = (int*)h_ALIST;
   int* cpu = (int*)h_ALIST_ref;
-  std::cout << "\n" << totalSize << "\n";
 
   bool allMatch = true;
   int errorCount = 0;
   const int MAX_ERRORS_TO_PRINT = 10;
   for (int i = 0; i < totalSize; i++) {
-    if (i < 20) {
-    printf("At index %d: GPU=%d, CPU=%d\n", 
-          i, gpu[i], cpu[i]);
-    }
     if (gpu[i] != cpu[i]) {
       if (errorCount < MAX_ERRORS_TO_PRINT) {
         printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 

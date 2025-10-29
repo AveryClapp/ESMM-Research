@@ -37,14 +37,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				int val = A[(dotIdx * BM) + warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM];
-				int active = static_cast<int>(__ballot_sync(0xFFFFFFFF, val) != 0.0f);
-				if (active && threadIdx.x == 0) {
+				if (__ballot_sync(0xFFFFFFFF, val != 0.0f) && threadIdxInWarp == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (WMITER * ELEMENTS_PER_PATTERN);
 					const uint countIdx = kBlockBase + wSubRowIdx * ELEMENTS_PER_PATTERN;
 					int currentCount = atomicAdd(&denseList[countIdx], 1);
 					if (currentCount < MAX_SPARSE_OFFSETS) {
-						const uint offsetIdx = countIdx + currentCount + 1;
-						denseList[offsetIdx] = dotIdx;
+						denseList[countIdx + currentCount + 1] = dotIdx;
 					} else {
 						denseList[countIdx] = -1;
 					}

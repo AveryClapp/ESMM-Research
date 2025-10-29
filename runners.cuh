@@ -417,48 +417,34 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasDestroy(handle);
 }
 
-bool run_a_preprocess(int rows, int cols, int inners, float *d_A,
-                         int *d_ALIST, int *h_ALIST, int *h_ALIST_ref, int runs) {
+bool run_a_preprocess(float *d_A, int rows, int cols, int inners) {
+    constexpr int ELEMENTS_PER_PATTERN = 5;
     const uint NUM_THREADS = 256;
-    const uint BN = 128;
-    const uint BM = 128;
-    const uint BK = 8;
-    const uint WN = 64;
-    const uint WM = 32;
-    const uint WNITER = 4;
-    const uint TN = 8;
-    const uint TM = 1;
+    const uint BN = 128, BM = 128, BK = 8;
+    const uint WN = 64, WM = 32, WNITER = 4;
+    const uint TN = 8, TM = 1;
 
     constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
-    constexpr uint WSUBM = WM / WMITER;
+    const int totalSize = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BK) * ELEMENTS_PER_PATTERN;
 
-    const int denseListSize = (inners / BK) * (BK * WMITER + WMITER);
-    const int numBlocks = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BN);
-    const int totalSize = numBlocks * denseListSize;
-   
+    PreprocessResult result;
+    result.totalSize = totalSize;
+    result.h_list = nullptr;
+
+    // Allocate device memory
+    cudaCheckError(cudaMalloc((void**)&result.d_list, totalSize * sizeof(int)));
+    cudaCheckError(cudaMemset(result.d_list, 0, totalSize));
+
+    // Run preprocessing kernel
     dim3 blockDim(NUM_THREADS);
     dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
 
-    float* h_A = (float*)malloc(rows * inners * sizeof(float));
-    cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
-    computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
-    free(h_A);
+    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, result.d_list);
 
-    cudaMemset(d_ALIST, 0, totalSize);
+    cudaCheckError(cudaDeviceSynchronize());
 
-    for (int i = 0; i < runs; i++) {
-        preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS><<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
-    }
-    cudaDeviceSynchronize();
-
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("CUDA error: %s\n", cudaGetErrorString(error));
-    }
-
-    cudaMemcpy(h_ALIST, d_ALIST, totalSize, cudaMemcpyDeviceToHost);
-    return verifyPreprocessResults(h_ALIST, h_ALIST_ref, totalSize);
-
+    return result;
 }
 
 // ============================================================================
@@ -729,67 +715,6 @@ bool run_esmm_unrolled_no_check(int rows, int cols, int inners, float *d_A, floa
   return true;
 }
 
-bool run_a_preprocess_no_check(int rows, int cols, int inners, float *d_A,
-                         int *d_ALIST,int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_ALIST, 0, rows * cols * sizeof(int));
-
-  for (int i = 0; i < runs; i++) {
-    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_ALIST);
-  }
-  cudaDeviceSynchronize();
-
-  return true;
-
-}
-
-
-PreprocessResult preprocess_matrix_a(float* d_A, int rows, int cols, int inners) {
-    constexpr int ELEMENTS_PER_PATTERN = 5;
-    const uint NUM_THREADS = 256;
-    const uint BN = 128, BM = 128, BK = 8;
-    const uint WN = 64, WM = 32, WNITER = 4;
-    const uint TN = 8, TM = 1;
-
-    constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
-
-    const int denseListSize = (inners / BK) * WMITER * ELEMENTS_PER_PATTERN;
-    const int numBlocks = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BN);
-    const int totalSize = numBlocks * denseListSize;
-
-    PreprocessResult result;
-    result.denseListSize = denseListSize;
-    result.numBlocks = numBlocks;
-    result.totalSize = totalSize;
-    result.h_list = nullptr;
-
-    // Allocate device memory
-    cudaCheckError(cudaMalloc((void**)&result.d_list, totalSize * sizeof(int)));
-    cudaCheckError(cudaMemset(result.d_list, 0, totalSize));
-
-    // Run preprocessing kernel
-    dim3 blockDim(NUM_THREADS);
-    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-
-    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, result.d_list);
-
-    cudaCheckError(cudaDeviceSynchronize());
-
-    return result;
-}
 
 void free_preprocess_result(PreprocessResult& result) {
     if (result.d_list) cudaFree(result.d_list);
@@ -798,10 +723,10 @@ void free_preprocess_result(PreprocessResult& result) {
     result.h_list = nullptr;
 }
 
-bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs) {
+bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check) {
     const uint BM = 128, BK = 8, WMITER = 4, WSUBM = 32;
 
-    PreprocessResult result = preprocess_matrix_a(d_A, rows, inners, inners);
+    PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
 
     result.h_list = (int*)calloc(result.totalSize, sizeof(int));
     int* h_ALIST_ref = (int*)calloc(result.totalSize, sizeof(int));
@@ -813,15 +738,16 @@ bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs) {
     computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
     free(h_A);
 
-    if (runs > 1) {
-        for (int i = 1; i < runs; i++) {
-            cudaMemset(result.d_list, 0, result.totalSize);
-            PreprocessResult temp = preprocess_matrix_a(d_A, rows, inners, inners);
-            cudaFree(temp.d_list);
-        }
+    for (int i = 1; i < runs; i++) {
+        cudaMemset(result.d_list, 0, result.totalSize);
+        PreprocessResult temp = run_a_preprocess(d_A, rows, cols, inners);
+        cudaFree(temp.d_list);
     }
 
-    bool passed = verifyPreprocessResults(result.h_list, h_ALIST_ref, result.totalSize);
+    bool passed = true;
+    if (check) {
+        passed = verifyPreprocessResults(result.h_list, h_ALIST_ref, result.totalSize);
+    }
 
     free(h_ALIST_ref);
     free_preprocess_result(result);

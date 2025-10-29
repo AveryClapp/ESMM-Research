@@ -19,8 +19,6 @@ struct PreprocessResult {
   int* d_list;
   int* h_list;
   int totalSize;
-  int denseListSize;
-  int numBlocks;
 };
 
 std::vector<int> parse_kernel_selection(const std::string& input) {
@@ -287,6 +285,10 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
         printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
           i, gpu[i], cpu[i]);
       }
+      if (gpu[i] != 7) {
+        printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
+          i, gpu[i], cpu[i]);
+      }
       errorCount++;
       allMatch = false;
     }
@@ -302,22 +304,15 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   return allMatch;
 }
 
-bool handle_preprocessing_commands(int argc, char** argv, std::string_view sparsity) {
+bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_view sparsity) {
   if (argc < 2) return false;
 
   std::string arg = argv[1];
-  if (arg != "0" && arg != "0a" && arg != "0b" && 
-      arg != "--preprocess" && arg != "--preprocess-a" && arg != "--preprocess-b") {
-    return false;
-  }
-
-  int size = (argc >= 3) ? atoi(argv[2]) : 1024;
-  int runs = (argc >= 4) ? atoi(argv[3]) : 1;
   bool success = false;
 
   if (arg == "0a" || arg == "--preprocess-a") {
     printf("=== A Matrix Preprocessing Verification ===\n");
-    printf("Size: %dx%d", size, size);
+    printf("Size: %dx%d\n", size, size);
 
     float *d_A;
     cudaMalloc(&d_A, size * size * sizeof(float));
@@ -325,8 +320,8 @@ bool handle_preprocessing_commands(int argc, char** argv, std::string_view spars
     randomize_matrix_with_pattern(h_A, size, size, sparsity);
     cudaMemcpy(d_A, h_A, size * size * sizeof(float), cudaMemcpyHostToDevice);
     free(h_A);
-
-    success = verify_preprocess_a(d_A, size, size, size, runs);
+    bool verify = !(argc > 2 && strcmp(argv[2], "-n") == 0);
+    success = verify_preprocess_a(d_A, size, size, size, runs, verify);
 
     cudaFree(d_A);
     printf("\n%s\n", success ? "✓ PASSED" : "✗ FAILED");

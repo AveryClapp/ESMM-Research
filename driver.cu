@@ -144,7 +144,9 @@ int main(int argc, char *argv[]) {
     constexpr int inners = 1024;
     constexpr std::string_view sparsity = "11111111";
 
-    handle_preprocessing_commands(argc, argv, sparsity);
+    if (argv[1] == "0" || argv[1] == "0a" || argv[1] == "0b") {
+        handle_preprocessing_commands(argc, argv, rows, sparsity);
+    }
 
     // Default values
     std::vector<int> kernel_choices = {13};

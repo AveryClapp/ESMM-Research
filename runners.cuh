@@ -21,6 +21,7 @@
 #include "./esmm_unrolled/esmm_unrolled_1.cu"
 #include "./preprocessors/a_preprocessor.cu"
 #include "./preprocessors/b_preprocessor.cu"
+#include "./preprocess_params.cuh"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -418,38 +419,27 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 }
 
 PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
-    constexpr int ELEMENTS_PER_PATTERN = 5;
-    const uint NUM_THREADS = 256;
-    const uint BN = 128;
-    const uint BM = 128;
-    const uint BK = 8;
-    const uint WN = 64;
-    const uint WM = 32;
-    const uint WNITER = 4;
-    const uint TN = 8;
-    const uint TM = 1;
 
-    const uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+    using P = PreprocessParams;
 
-    const int totalSize = CEIL_DIV(rows, BM) * CEIL_DIV(inners, BK) * ELEMENTS_PER_PATTERN * WMITER;
-    std::cout << totalSize << "\n";
+    dim3 blockDim(P::NUM_THREADS);
+    dim3 gridDim(1, CEIL_DIV(rows, P::BM));
+
+    const int denseListSize = P::denseListSize(inners);
+    const int totalSize = gridDim.y * denseListSize;
+
     PreprocessResult result;
     result.totalSize = totalSize;
-    result.h_list = nullptr;
+    cudaMalloc(&result.d_list, totalSize * sizeof(int));
 
-    // Allocate device memory
-    cudaCheckError(cudaMalloc((void**)&result.d_list, totalSize * sizeof(int)));
-    cudaCheckError(cudaMemset(result.d_list, 0, totalSize));
+    preprocess_A<
+        P::BM, P::BN, P::BK,
+        P::WM, P::WN, P::WNITER,
+        P::TM, P::TN,
+        P::NUM_THREADS
+    ><<<gridDim, blockDim>>>(rows, cols, inners, d_A, result.d_list);
 
-    // Run preprocessing kernel
-    dim3 blockDim(NUM_THREADS);
-    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-
-    preprocess_A<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, result.d_list);
-
-    cudaCheckError(cudaDeviceSynchronize());
-
+    cudaDeviceSynchronize();
     return result;
 }
 
@@ -730,7 +720,7 @@ void free_preprocess_result(PreprocessResult& result) {
 }
 
 bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check) {
-    const uint BM = 128, BK = 8, WMITER = 2, WSUBM = 16;
+    const uint BM = 128, BK = 8, WMITER = 1, WSUBM = 32;
 
     PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
 

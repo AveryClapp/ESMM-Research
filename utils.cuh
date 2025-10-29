@@ -1,5 +1,6 @@
 #pragma once
 
+#include "preprocess_params.cuh"
 #include <cuda_runtime.h>
 #include <vector>
 #include <iostream>
@@ -234,22 +235,24 @@ std::vector<int> computeExpandedIndices(std::string_view pattern) {
 }
 
 void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int cols,  int BM, int BK, int WMITER, int WSUBM) {
-  const int numKBlocks = cols / BK;
-  const int numBlockRows = rows / BM;
-  const int MAX_SPARSE_OFFSETS = BK / 2;
-  const int ELEMENTS_PER_PATTERN = 1 + MAX_SPARSE_OFFSETS;
+  using P = PreprocessParams;
+
+  const int numKBlocks = cols / P::BK;
+  const int numBlockRows = rows / P::BM;
 
   for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-      for (int subRow = 0; subRow < 2; subRow++) {
+      for (int subRow = 0; subRow < P::WMITER; subRow++) {
         int count = 0;
-        int offsets[MAX_SPARSE_OFFSETS] = {0};
-        for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
+        int offsets[P::MAX_SPARSE_OFFSETS] = {0};
+
+        for (int dotIdx = 0; dotIdx < P::BK; dotIdx++) {
           for (int threadRow = 0; threadRow < 32; threadRow++) {
-            int globalRow = blockRow * BM + subRow * WSUBM + threadRow;
-            int globalCol = kBlock * BK + dotIdx;
+            int globalRow = blockRow * P::BM + subRow * P::WSUBM + threadRow;
+            int globalCol = kBlock * P::BK + dotIdx;
+
             if (A[globalRow * cols + globalCol] != 0.0f) {
-              if (count < MAX_SPARSE_OFFSETS) {
+              if (count < P::MAX_SPARSE_OFFSETS) {
                 offsets[count++] = dotIdx;
                 break;
               } else {
@@ -260,19 +263,22 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
           }
           if (count == -1) break;
         }
-        // Gets index corresponding to the start of the row
-        const int blockBase = (blockRow * WMITER) * numKBlocks * ELEMENTS_PER_PATTERN;
-        const int kBlockBase = blockBase + kBlock * WMITER * ELEMENTS_PER_PATTERN;
-        const int subRowBase = kBlockBase + subRow * ELEMENTS_PER_PATTERN;
+
+        const int blockBase = (blockRow * P::WMITER) * numKBlocks * P::ELEMENTS_PER_PATTERN;
+        const int kBlockBase = blockBase + kBlock * P::WMITER * P::ELEMENTS_PER_PATTERN;
+        const int subRowBase = kBlockBase + subRow * P::ELEMENTS_PER_PATTERN;
+
         h_ALIST_ref[subRowBase] = count;
-        for (int i = 0; i < MAX_SPARSE_OFFSETS; i++) {
-          //std::cout << subRowBase + 1 + i << std::endl;
+        for (int i = 0; i < P::MAX_SPARSE_OFFSETS; i++) {
           h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
         }
       }
     } 
   }
 }
+
+
+
 
 bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   int* gpu = (int*)h_ALIST;

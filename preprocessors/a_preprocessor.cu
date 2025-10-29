@@ -41,10 +41,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				if (__ballot_sync(0xFFFFFFFF, val != 0.0f) && threadIdxInWarp == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (WMITER * ELEMENTS_PER_PATTERN);
 					const uint countIdx = kBlockBase + wSubRowIdx * ELEMENTS_PER_PATTERN;
-					int currentCount = denseList[countIdx];
+					int currentCount = atomicAdd(&denseList[countIdx], 1);
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						denseList[countIdx + currentCount + 1] = dotIdx;
-						++denseList[countIdx];
 					} else {
 						denseList[countIdx] = -1;
 					}

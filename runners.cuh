@@ -298,7 +298,7 @@ bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
   const uint BK = 8;
   const uint WN = 64;
   const uint WM = 32;
-  const uint WNITER = 4;
+  const uint WNITER = 2;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -406,13 +406,13 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasCreate(&handle);
   const float alpha = 1.0f;
   const float beta = 0.0f;
-  
+
   for (int i = 0; i < runs; i++) {
     cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, cols, rows, inners, 
                 &alpha, d_B, cols, d_A, inners, &beta, d_C, cols);
   }
   cudaDeviceSynchronize();
-  
+
   cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
   cublasDestroy(handle);
 }
@@ -420,12 +420,19 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
 PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
     constexpr int ELEMENTS_PER_PATTERN = 5;
     const uint NUM_THREADS = 256;
-    const uint BN = 128, BM = 128, BK = 8;
-    const uint WN = 64, WM = 32, WNITER = 4;
-    const uint TN = 8, TM = 1;
+    const uint BN = 128;
+    const uint BM = 128;
+    const uint BK = 8;
+    const uint WN = 64;
+    const uint WM = 32;
+    const uint WNITER = 4;
+    const uint TN = 8;
+    const uint TM = 1;
 
-    const int totalSize = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BK) * ELEMENTS_PER_PATTERN;
+    const uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 
+    const int totalSize = CEIL_DIV(rows, BM) * CEIL_DIV(inners, BK) * ELEMENTS_PER_PATTERN * WMITER;
+    std::cout << totalSize << "\n";
     PreprocessResult result;
     result.totalSize = totalSize;
     result.h_list = nullptr;
@@ -723,7 +730,7 @@ void free_preprocess_result(PreprocessResult& result) {
 }
 
 bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check) {
-    const uint BM = 128, BK = 8, WMITER = 4, WSUBM = 32;
+    const uint BM = 128, BK = 8, WMITER = 2, WSUBM = 16;
 
     PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
 

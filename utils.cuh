@@ -241,7 +241,7 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
 
   for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-      for (int subRow = 0; subRow < WMITER; subRow++) {
+      for (int subRow = 0; subRow < 2; subRow++) {
         int count = 0;
         int offsets[MAX_SPARSE_OFFSETS] = {0};
         for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
@@ -260,11 +260,13 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
           }
           if (count == -1) break;
         }
-        const int blockBase = blockRow * numKBlocks * WMITER * ELEMENTS_PER_PATTERN;
+        // Gets index corresponding to the start of the row
+        const int blockBase = (blockRow * WMITER) * numKBlocks * ELEMENTS_PER_PATTERN;
         const int kBlockBase = blockBase + kBlock * WMITER * ELEMENTS_PER_PATTERN;
         const int subRowBase = kBlockBase + subRow * ELEMENTS_PER_PATTERN;
         h_ALIST_ref[subRowBase] = count;
         for (int i = 0; i < MAX_SPARSE_OFFSETS; i++) {
+          //std::cout << subRowBase + 1 + i << std::endl;
           h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
         }
       }

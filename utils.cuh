@@ -14,7 +14,7 @@ using std::endl;
 
 
 // Forward decl
-bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs);
+bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check);
 struct PreprocessResult {
   int* d_list;
   int* h_list;
@@ -264,7 +264,7 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
         const int kBlockBase = blockBase + kBlock * WMITER * ELEMENTS_PER_PATTERN;
         const int subRowBase = kBlockBase + subRow * ELEMENTS_PER_PATTERN;
         h_ALIST_ref[subRowBase] = count;
-        for (int i = 0; i < BK; i++) {
+        for (int i = 0; i < MAX_SPARSE_OFFSETS; i++) {
           h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
         }
       }
@@ -285,10 +285,6 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
         printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
           i, gpu[i], cpu[i]);
       }
-      if (gpu[i] != 7) {
-        printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
-          i, gpu[i], cpu[i]);
-      }
       errorCount++;
       allMatch = false;
     }
@@ -305,15 +301,13 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
 }
 
 bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_view sparsity) {
-  if (argc < 2) return false;
-
   std::string arg = argv[1];
   bool success = false;
 
   if (arg == "0a" || arg == "--preprocess-a") {
     printf("=== A Matrix Preprocessing Verification ===\n");
     printf("Size: %dx%d\n", size, size);
-
+    constexpr int runs = 1;
     float *d_A;
     cudaMalloc(&d_A, size * size * sizeof(float));
     float* h_A = (float*)malloc(size * size * sizeof(float));
@@ -344,7 +338,7 @@ __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
   const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
   threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
   threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
-  threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
+  threadResults[threadResBase + 3] += regM_val * regN[regNBase + 2];
   threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
   threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
   threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];

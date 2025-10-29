@@ -143,9 +143,12 @@ int main(int argc, char *argv[]) {
     constexpr int cols = 1024;
     constexpr int inners = 1024;
     constexpr std::string_view sparsity = "11111111";
-
-    if (argv[1] == "0" || argv[1] == "0a" || argv[1] == "0b") {
-        handle_preprocessing_commands(argc, argv, rows, sparsity);
+    
+    if (argc > 1) {
+        std::string arg = argv[1];
+        if (arg == "0" || arg == "0a" || arg == "0b") {
+            handle_preprocessing_commands(argc, argv, rows, sparsity);
+        }
     }
 
     // Default values

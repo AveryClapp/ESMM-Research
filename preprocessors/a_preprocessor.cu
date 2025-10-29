@@ -32,6 +32,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	A += cRow * BM * K;
 
+	__syncthreads();
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		// Traverse 32x8 blocks and accumulate sparsity
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
@@ -40,28 +41,32 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				if (__ballot_sync(0xFFFFFFFF, val != 0.0f) && threadIdxInWarp == 0) {
 					const uint kBlockBase = (bkIdx / BK) * (WMITER * ELEMENTS_PER_PATTERN);
 					const uint countIdx = kBlockBase + wSubRowIdx * ELEMENTS_PER_PATTERN;
-					int currentCount = atomicAdd(&denseList[countIdx], 1);
+					int currentCount = denseList[countIdx];
 					if (currentCount < MAX_SPARSE_OFFSETS) {
 						denseList[countIdx + currentCount + 1] = dotIdx;
+						++denseList[countIdx];
 					} else {
 						denseList[countIdx] = -1;
 					}
 				}
 			}
+			
+		__syncthreads();
 		}
 		A += BK;
 		__syncthreads();
 	}
 
 	// CeilDiv size of dense list (should already be divisible by 4)
-	constexpr uint denseListSizeFloat4 = (denseListSize + 3) / 4;
+	constexpr uint denseListSizeInt4 = (denseListSize + 3) / 4;
 
-	const uint blockOffset = (cRow) * denseListSizeFloat4;
+	const uint blockOffset = (cRow * gridDim.x + cCol) * denseListSizeInt4;
 
 	int4* denseListVec = reinterpret_cast<int4*>(denseList);
 	int4* A_LIST_Vec = reinterpret_cast<int4*>(A_LIST);
 
-	for (uint i = threadIdx.x; i < denseListSizeFloat4; i += blockDim.x) {
+	// Each thread writes 4 and increment by 256 (Each warp writes 2560 elements to this runs 10 times)
+	for (uint i = threadIdx.x; i < denseListSizeInt4; i += blockDim.x) {
 		A_LIST_Vec[blockOffset + i] = denseListVec[i];
 	}
 }

@@ -417,14 +417,13 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasDestroy(handle);
 }
 
-bool run_a_preprocess(float *d_A, int rows, int cols, int inners) {
+PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
     constexpr int ELEMENTS_PER_PATTERN = 5;
     const uint NUM_THREADS = 256;
     const uint BN = 128, BM = 128, BK = 8;
     const uint WN = 64, WM = 32, WNITER = 4;
     const uint TN = 8, TM = 1;
 
-    constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
     const int totalSize = CEIL_DIV(rows, BM) * CEIL_DIV(cols, BK) * ELEMENTS_PER_PATTERN;
 
     PreprocessResult result;
@@ -737,12 +736,6 @@ bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, b
     cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
     computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
     free(h_A);
-
-    for (int i = 1; i < runs; i++) {
-        cudaMemset(result.d_list, 0, result.totalSize);
-        PreprocessResult temp = run_a_preprocess(d_A, rows, cols, inners);
-        cudaFree(temp.d_list);
-    }
 
     bool passed = true;
     if (check) {

@@ -14,12 +14,13 @@ struct PreprocessParams {
 
     static constexpr int WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
     static constexpr int WSUBM = WM / WMITER;
+    static constexpr int NUM_WARP_ROWS = (BM + WM - 1) / WM;
 
     static constexpr int MAX_SPARSE_OFFSETS = BK / 2;
     static constexpr int ELEMENTS_PER_PATTERN = 1 + MAX_SPARSE_OFFSETS;
 
     static constexpr int denseListSize(int K) {
-        return (K / BK) * WMITER * ELEMENTS_PER_PATTERN;
+        return (K / BK) * NUM_WARP_ROWS * WMITER * ELEMENTS_PER_PATTERN;
     }
 };
 

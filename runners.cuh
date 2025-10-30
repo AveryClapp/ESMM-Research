@@ -431,6 +431,7 @@ PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
     PreprocessResult result;
     result.totalSize = totalSize;
     cudaMalloc(&result.d_list, totalSize * sizeof(int));
+    cudaMemset(result.d_list, 0, totalSize * sizeof(int));
 
     preprocess_A<
         P::BM, P::BN, P::BK,
@@ -727,7 +728,7 @@ bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, b
     result.h_list = (int*)calloc(result.totalSize, sizeof(int));
     int* h_ALIST_ref = (int*)calloc(result.totalSize, sizeof(int));
 
-    cudaMemcpy(result.h_list, result.d_list, result.totalSize, cudaMemcpyDeviceToHost);
+    cudaMemcpy(result.h_list, result.d_list, result.totalSize * sizeof(int), cudaMemcpyDeviceToHost);
 
     float* h_A = (float*)malloc(rows * inners * sizeof(float));
     cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);

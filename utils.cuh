@@ -242,38 +242,41 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
 
   for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-      for (int subRow = 0; subRow < P::WMITER; subRow++) {
-        int count = 0;
-        int offsets[P::MAX_SPARSE_OFFSETS] = {0};
+      for (int warpRow = 0; warpRow < P::NUM_WARP_ROWS; warpRow++) {
+        for (int subRow = 0; subRow < P::WMITER; subRow++) {
+          int count = 0;
+          int offsets[P::MAX_SPARSE_OFFSETS] = {0};
 
-        for (int dotIdx = 0; dotIdx < P::BK; dotIdx++) {
-          for (int threadRow = 0; threadRow < 32; threadRow++) {
-            int globalRow = blockRow * P::BM + subRow * P::WSUBM + threadRow;
-            int globalCol = kBlock * P::BK + dotIdx;
+          for (int dotIdx = 0; dotIdx < P::BK; dotIdx++) {
+            for (int threadRow = 0; threadRow < 32; threadRow++) {
+              int globalRow = blockRow * P::BM + warpRow * (P::BM / P::NUM_WARP_ROWS) + subRow * P::WSUBM + threadRow;
+              int globalCol = kBlock * P::BK + dotIdx;
 
-            if (A[globalRow * cols + globalCol] != 0.0f) {
-              if (count < P::MAX_SPARSE_OFFSETS) {
-                offsets[count++] = dotIdx;
-                break;
-              } else {
-                count = -1;
-                break;
+              if (A[globalRow * cols + globalCol] != 0.0f) {
+                if (count < P::MAX_SPARSE_OFFSETS) {
+                  offsets[count++] = dotIdx;
+                  break;
+                } else {
+                  count = -1;
+                  break;
+                }
               }
             }
+            if (count == -1) break;
           }
-          if (count == -1) break;
-        }
 
-        const int blockBase = (blockRow * P::WMITER) * numKBlocks * P::ELEMENTS_PER_PATTERN;
-        const int kBlockBase = blockBase + kBlock * P::WMITER * P::ELEMENTS_PER_PATTERN;
-        const int subRowBase = kBlockBase + subRow * P::ELEMENTS_PER_PATTERN;
+          const int blockBase = blockRow * numKBlocks * P::NUM_WARP_ROWS * P::WMITER * P::ELEMENTS_PER_PATTERN;
+          const int kBlockBase = blockBase + kBlock * P::NUM_WARP_ROWS * P::WMITER * P::ELEMENTS_PER_PATTERN;
+          const int warpRowBase = kBlockBase + warpRow * P::WMITER * P::ELEMENTS_PER_PATTERN;
+          const int subRowBase = warpRowBase + subRow * P::ELEMENTS_PER_PATTERN;
 
-        h_ALIST_ref[subRowBase] = count;
-        for (int i = 0; i < P::MAX_SPARSE_OFFSETS; i++) {
-          h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
+          h_ALIST_ref[subRowBase] = count;
+          for (int i = 0; i < P::MAX_SPARSE_OFFSETS; i++) {
+            h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
+          }
         }
       }
-    } 
+    }
   }
 }
 

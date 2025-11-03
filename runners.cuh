@@ -14,6 +14,7 @@
 #include "./old_kernels/1D_vec.cu"
 #include "./esmm.cu"
 #include "./esmm_offsets.cu"
+#include "./esmm_preprocessed.cu"
 #include "./esmm_unrolled/esmm_unrolled_8.cu"
 #include "./esmm_unrolled/esmm_unrolled_6.cu"
 #include "./esmm_unrolled/esmm_unrolled_4.cu"
@@ -418,6 +419,14 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasDestroy(handle);
 }
 
+void free_preprocess_result(PreprocessResult& result) {
+    if (result.d_list) cudaFree(result.d_list);
+    if (result.h_list) free(result.h_list);
+    result.d_list = nullptr;
+    result.h_list = nullptr;
+}
+
+
 PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
 
     using P = PreprocessParams;
@@ -430,6 +439,7 @@ PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
 
     PreprocessResult result;
     result.totalSize = totalSize;
+    result.h_list = nullptr;  // Initialize to nullptr to avoid double-free
     cudaMalloc(&result.d_list, totalSize * sizeof(int));
     cudaMemset(result.d_list, 0, totalSize * sizeof(int));
 
@@ -443,6 +453,75 @@ PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
     cudaDeviceSynchronize();
     return result;
 }
+
+bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check) {
+    const uint BM = 128, BK = 8, WMITER = 1, WSUBM = 32;
+
+    PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
+
+    result.h_list = (int*)calloc(result.totalSize, sizeof(int));
+    int* h_ALIST_ref = (int*)calloc(result.totalSize, sizeof(int));
+
+    cudaMemcpy(result.h_list, result.d_list, result.totalSize * sizeof(int), cudaMemcpyDeviceToHost);
+
+    float* h_A = (float*)malloc(rows * inners * sizeof(float));
+    cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
+    computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
+    free(h_A);
+
+    bool passed = true;
+    if (check) {
+        passed = verifyPreprocessResults(result.h_list, h_ALIST_ref, result.totalSize);
+    }
+
+    free(h_ALIST_ref);
+    free_preprocess_result(result);
+
+    return passed;
+}
+
+bool run_esmm_preprocessed(int rows, int cols, int inners, float *d_A, float *d_B,
+                           float *d_C, float *h_C, float *h_C_ref, int runs) {
+  // Must match PreprocessParams exactly!
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 8;  // MUST match preprocessing!
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Run preprocessing
+  PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
+
+  // Run ESMM with preprocessing
+  for (int i = 0; i < runs; i++) {
+    esmm_preprocessed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+  }
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_preprocess_result(result);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_preprocess_result(result);
+  return passed;
+}
+
+
 
 // ============================================================================
 // PERFORMANCE-ONLY VERSIONS (NO RESULT CHECKING)
@@ -713,35 +792,37 @@ bool run_esmm_unrolled_no_check(int rows, int cols, int inners, float *d_A, floa
 }
 
 
-void free_preprocess_result(PreprocessResult& result) {
-    if (result.d_list) cudaFree(result.d_list);
-    if (result.h_list) free(result.h_list);
-    result.d_list = nullptr;
-    result.h_list = nullptr;
+
+
+bool run_esmm_preprocessed_no_check(int rows, int cols, int inners, float *d_A,
+                                   float *d_B, float *d_C, int runs) {
+  // Must match PreprocessParams exactly!
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 8;  // MUST match preprocessing!
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Run preprocessing
+  PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
+
+  // Run ESMM with preprocessing
+  for (int i = 0; i < runs; i++) {
+    esmm_preprocessed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+  }
+  cudaDeviceSynchronize();
+
+  free_preprocess_result(result);
+  return true;
 }
 
-bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check) {
-    const uint BM = 128, BK = 8, WMITER = 1, WSUBM = 32;
 
-    PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
-
-    result.h_list = (int*)calloc(result.totalSize, sizeof(int));
-    int* h_ALIST_ref = (int*)calloc(result.totalSize, sizeof(int));
-
-    cudaMemcpy(result.h_list, result.d_list, result.totalSize * sizeof(int), cudaMemcpyDeviceToHost);
-
-    float* h_A = (float*)malloc(rows * inners * sizeof(float));
-    cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
-    computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
-    free(h_A);
-
-    bool passed = true;
-    if (check) {
-        passed = verifyPreprocessResults(result.h_list, h_ALIST_ref, result.totalSize);
-    }
-
-    free(h_ALIST_ref);
-    free_preprocess_result(result);
-
-    return passed;
-}

@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 15; i++) {
+    for (int i = 1; i <= 16; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 15; i++) {
+    for (int i = start; i <= end && i <= 16; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 15) {
+    if (kernel >= 1 && kernel <= 16) {
       kernels.push_back(kernel);
     }
   }
@@ -68,6 +68,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 13: return "ESMM Offsets";
     case 14: return "ESMM Unrolled";
     case 15: return "cuBLAS";
+    case 16: return "ESMM Preprocessed (Bitmask)";
     default: return "Unknown Kernel";
   }
 }
@@ -80,10 +81,10 @@ void print_usage(const char* program_name) {
   cout << "  0b, --preprocess-b    Run B matrix preprocessing verification" << endl;
   cout << "  [size] [runs]         Optional: matrix size (default 1024) and runs (default 10)" << endl;
   cout << "\nKernel_choice: " << endl;
-  cout << "    Single kernel: 1-15 (run specific kernel)" << endl;
+  cout << "    Single kernel: 1-16 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
   cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-  cout << "    All: \"all\" (run all kernels 1-15)" << endl;
+  cout << "    All: \"all\" (run all kernels 1-16)" << endl;
   cout << "  runs: number of runs per kernel (default: 1)" << endl;
   cout << "  Options:" << endl;
   cout << "    --verbose, -v: Enable verbose output" << endl;
@@ -240,44 +241,59 @@ void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int col
   const int numKBlocks = cols / P::BK;
   const int numBlockRows = rows / P::BM;
 
+  // Total number of masks and ints
+  const int numMasks = numKBlocks * P::NUM_WARP_ROWS * P::WMITER;
+  const int numInts = (numMasks + 3) / 4;
+
+  // Temporary buffer for masks
+  uint8_t* masks = new uint8_t[numMasks];
+  memset(masks, 0, numMasks);
+
   for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
       for (int warpRow = 0; warpRow < P::NUM_WARP_ROWS; warpRow++) {
         for (int subRow = 0; subRow < P::WMITER; subRow++) {
-          int count = 0;
-          int offsets[P::MAX_SPARSE_OFFSETS] = {0};
+          uint8_t mask = 0;
 
+          // Check each column in the K-block
           for (int dotIdx = 0; dotIdx < P::BK; dotIdx++) {
+            bool hasNonZero = false;
+            // Check all 32 rows for this warp sub-row
             for (int threadRow = 0; threadRow < 32; threadRow++) {
               int globalRow = blockRow * P::BM + warpRow * (P::BM / P::NUM_WARP_ROWS) + subRow * P::WSUBM + threadRow;
               int globalCol = kBlock * P::BK + dotIdx;
 
               if (A[globalRow * cols + globalCol] != 0.0f) {
-                if (count < P::MAX_SPARSE_OFFSETS) {
-                  offsets[count++] = dotIdx;
-                  break;
-                } else {
-                  count = -1;
-                  break;
-                }
+                hasNonZero = true;
+                break;
               }
             }
-            if (count == -1) break;
+
+            // Set bit if any value in this column is non-zero
+            if (hasNonZero) {
+              mask |= (1 << dotIdx);
+            }
           }
 
-          const int blockBase = blockRow * numKBlocks * P::NUM_WARP_ROWS * P::WMITER * P::ELEMENTS_PER_PATTERN;
-          const int kBlockBase = blockBase + kBlock * P::NUM_WARP_ROWS * P::WMITER * P::ELEMENTS_PER_PATTERN;
-          const int warpRowBase = kBlockBase + warpRow * P::WMITER * P::ELEMENTS_PER_PATTERN;
-          const int subRowBase = warpRowBase + subRow * P::ELEMENTS_PER_PATTERN;
-
-          h_ALIST_ref[subRowBase] = count;
-          for (int i = 0; i < P::MAX_SPARSE_OFFSETS; i++) {
-            h_ALIST_ref[subRowBase + 1 + i] = offsets[i];
-          }
+          // Store mask in temporary buffer
+          const int maskIdx = kBlock * P::NUM_WARP_ROWS * P::WMITER + warpRow * P::WMITER + subRow;
+          masks[maskIdx] = mask;
         }
       }
     }
+
+    // Pack masks into ints (4 masks per int)
+    const int blockOffset = blockRow * numInts;
+    for (int i = 0; i < numInts; i++) {
+      int packed = 0;
+      for (int j = 0; j < 4 && (i * 4 + j) < numMasks; j++) {
+        packed |= (masks[i * 4 + j] << (j * 8));
+      }
+      h_ALIST_ref[blockOffset + i] = packed;
+    }
   }
+
+  delete[] masks;
 }
 
 
@@ -341,6 +357,7 @@ bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_
   exit(success ? 0 : 1);
 }
 
+
 //TODO: Replace these with unrolled loops file
 __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
     int WNITER, float regM_val, float* regN,
@@ -349,7 +366,7 @@ __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
   const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
   threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
   threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
-  threadResults[threadResBase + 3] += regM_val * regN[regNBase + 2];
+  threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
   threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
   threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
   threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];

@@ -16,11 +16,14 @@ struct PreprocessParams {
     static constexpr int WSUBM = WM / WMITER;
     static constexpr int NUM_WARP_ROWS = (BM + WM - 1) / WM;
 
-    static constexpr int MAX_SPARSE_OFFSETS = BK / 2;
-    static constexpr int ELEMENTS_PER_PATTERN = 1 + MAX_SPARSE_OFFSETS;
+    // Bitmask encoding: 1 byte per pattern (8 bits for BK=8)
+    // Store as uint8_t, pack 4 masks per int for alignment
+    static constexpr int MASKS_PER_INT = 4;
 
     static constexpr int denseListSize(int K) {
-        return (K / BK) * NUM_WARP_ROWS * WMITER * ELEMENTS_PER_PATTERN;
+        int numMasks = (K / BK) * NUM_WARP_ROWS * WMITER;
+        // Round up to pack 4 masks per int
+        return (numMasks + MASKS_PER_INT - 1) / MASKS_PER_INT;
     }
 };
 

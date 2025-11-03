@@ -34,5 +34,6 @@
 *.out
 *.app
 
+__pycache__/
 
-OPTIMIZATION_SUGGESTIONS.md
+# Created by venv; see https://docs.python.org/3/library/venv.html

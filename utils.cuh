@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 16; i++) {
+    for (int i = 1; i <= 17; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 16; i++) {
+    for (int i = start; i <= end && i <= 17; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 16) {
+    if (kernel >= 1 && kernel <= 17) {
       kernels.push_back(kernel);
     }
   }
@@ -69,6 +69,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 14: return "ESMM Unrolled";
     case 15: return "cuBLAS";
     case 16: return "ESMM Preprocessed (Bitmask)";
+    case 17: return "ESMM Preprocessed (Row-Level, Config-Agnostic)";
     default: return "Unknown Kernel";
   }
 }
@@ -81,10 +82,10 @@ void print_usage(const char* program_name) {
   cout << "  0b, --preprocess-b    Run B matrix preprocessing verification" << endl;
   cout << "  [size] [runs]         Optional: matrix size (default 1024) and runs (default 10)" << endl;
   cout << "\nKernel_choice: " << endl;
-  cout << "    Single kernel: 1-16 (run specific kernel)" << endl;
+  cout << "    Single kernel: 1-17 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
   cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-  cout << "    All: \"all\" (run all kernels 1-16)" << endl;
+  cout << "    All: \"all\" (run all kernels 1-17)" << endl;
   cout << "  runs: number of runs per kernel (default: 1)" << endl;
   cout << "  Options:" << endl;
   cout << "    --verbose, -v: Enable verbose output" << endl;

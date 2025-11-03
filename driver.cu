@@ -127,6 +127,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_preprocessed_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 17: // ESMM with Row-Level Preprocessing (Config-Agnostic)
+        if (check_results) {
+            res = run_esmm_preprocessed_rowlevel(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_preprocessed_rowlevel_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -146,10 +153,10 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 int main(int argc, char *argv[]) {
 
     // Define Matrix Dims
-    constexpr int rows = 1024;
-    constexpr int cols = 1024;
-    constexpr int inners = 1024;
-    constexpr std::string_view sparsity = "11111111";
+    constexpr int rows = 4096;
+    constexpr int cols = 4096;
+    constexpr int inners = 4096;
+    constexpr std::string_view sparsity = "11110000";
     
     if (argc > 1) {
         std::string arg = argv[1];

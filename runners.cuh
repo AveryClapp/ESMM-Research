@@ -15,12 +15,14 @@
 #include "./esmm.cu"
 #include "./esmm_offsets.cu"
 #include "./esmm_preprocessed.cu"
+#include "./esmm_preprocessed_rowlevel.cu"
 #include "./esmm_unrolled/esmm_unrolled_8.cu"
 #include "./esmm_unrolled/esmm_unrolled_6.cu"
 #include "./esmm_unrolled/esmm_unrolled_4.cu"
 #include "./esmm_unrolled/esmm_unrolled_2.cu"
 #include "./esmm_unrolled/esmm_unrolled_1.cu"
 #include "./preprocessors/a_preprocessor.cu"
+#include "./preprocessors/a_preprocessor_rowlevel.cu"
 #include "./preprocessors/b_preprocessor.cu"
 #include "./preprocess_params.cuh"
 #include <chrono>
@@ -294,13 +296,13 @@ bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
 bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs, 
                     std::string_view pattern) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
+  const uint NUM_THREADS = 128;
+  const uint BN = 64;
+  const uint BM = 64;
   const uint BK = 8;
-  const uint WN = 64;
+  const uint WN = 32;
   const uint WM = 32;
-  const uint WNITER = 2;
+  const uint WNITER = 1;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -356,13 +358,13 @@ bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
 bool run_esmm_unrolled(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs, 
                     std::string_view pattern) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
+  const uint NUM_THREADS = 128;
+  const uint BN = 64;
+  const uint BM = 64;
   const uint BK = 8;
-  const uint WN = 64;
+  const uint WN = 32;
   const uint WM = 32;
-  const uint WNITER = 4;
+  const uint WNITER = 1;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -822,6 +824,121 @@ bool run_esmm_preprocessed_no_check(int rows, int cols, int inners, float *d_A,
   cudaDeviceSynchronize();
 
   free_preprocess_result(result);
+  return true;
+}
+
+// Row-level preprocessing - config agnostic
+struct PreprocessResultRowLevel {
+  uint8_t* d_list;
+  uint8_t* h_list;
+  int totalSize;
+};
+
+void free_preprocess_result_rowlevel(PreprocessResultRowLevel& result) {
+    if (result.d_list) cudaFree(result.d_list);
+    if (result.h_list) free(result.h_list);
+    result.d_list = nullptr;
+    result.h_list = nullptr;
+}
+
+PreprocessResultRowLevel run_a_preprocess_rowlevel(float *d_A, int M, int K, int BK) {
+    constexpr int NUM_THREADS = 256;
+
+    dim3 blockDim(NUM_THREADS);
+    dim3 gridDim(CEIL_DIV(M, NUM_THREADS));
+
+    const int numKBlocks = K / BK;
+    const int totalSize = M * numKBlocks;  // One byte per row per K-block
+
+    PreprocessResultRowLevel result;
+    result.totalSize = totalSize;
+    result.h_list = nullptr;
+    cudaMalloc(&result.d_list, totalSize * sizeof(uint8_t));
+    cudaMemset(result.d_list, 0, totalSize * sizeof(uint8_t));
+
+    if (BK == 8) {
+        preprocess_A_rowlevel<8, NUM_THREADS>
+            <<<gridDim, blockDim>>>(M, M, K, d_A, result.d_list);
+    } else if (BK == 16) {
+        preprocess_A_rowlevel<16, NUM_THREADS>
+            <<<gridDim, blockDim>>>(M, M, K, d_A, result.d_list);
+    } else {
+        printf("ERROR: BK=%d not supported for row-level preprocessing\n", BK);
+    }
+
+    cudaDeviceSynchronize();
+    return result;
+}
+
+bool run_esmm_preprocessed_rowlevel(int rows, int cols, int inners, float *d_A, float *d_B,
+                                    float *d_C, float *h_C, float *h_C_ref, int runs) {
+  // Use optimal config - independent of preprocessing!
+  const uint NUM_THREADS = 128;
+  const uint BN = 64;
+  const uint BM = 64;
+  const uint BK = 8;  // Can use any BK now!
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;  // Can use any WNITER now!
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Run row-level preprocessing
+  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
+
+  // Run ESMM with row-level preprocessing
+  for (int i = 0; i < runs; i++) {
+    esmm_preprocessed_rowlevel<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+  }
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_preprocess_result_rowlevel(result);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_preprocess_result_rowlevel(result);
+  return passed;
+}
+
+bool run_esmm_preprocessed_rowlevel_no_check(int rows, int cols, int inners, float *d_A,
+                                             float *d_B, float *d_C, int runs) {
+  // Use optimal config - independent of preprocessing!
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 16;  // Can use any BK now!
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;  // Can use any WNITER now!
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Run row-level preprocessing
+  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
+
+  // Run ESMM with row-level preprocessing
+  for (int i = 0; i < runs; i++) {
+    esmm_preprocessed_rowlevel<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+  }
+  cudaDeviceSynchronize();
+
+  free_preprocess_result_rowlevel(result);
   return true;
 }
 

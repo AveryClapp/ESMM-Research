@@ -4,7 +4,7 @@
 /* Instead of: for(i=0; i<SIZE; i++) { dotIdx = sparse_data[i]; ... } */
 /* We hardcode: dotIdx=0, dotIdx=1, ..., dotIdx=7 */
 
-#include "../utils.cuh"
+#include "../../include/utils.cuh"
 #include <cuda_runtime.h>
 
 /*

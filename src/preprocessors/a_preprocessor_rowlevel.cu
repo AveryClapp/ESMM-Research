@@ -2,7 +2,7 @@
 
 /* Row-Level Preprocessor for A matrix - Config Agnostic */
 
-#include "../utils.cuh"
+#include "../../include/utils.cuh"
 #include <cuda_runtime.h>
 
 /*
@@ -35,7 +35,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 		if (row >= M) return;
 
-		#pragma unroll 4
+		#pragma unroll 16
 		for (uint kBlock = 0; kBlock < numKBlocks; kBlock++) {
 
 			// Use __ldg for read-only cache optimization
@@ -44,7 +44,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 			const uint32_t ballot = __ballot_sync(0xffffffff, val != 0.0f);
 
-			uint16_t mask;
+			uint8_t mask;
 			if constexpr (BK == 8) {
 				const uint shift = localRowInWarp * 8;
 				mask = (ballot >> shift) & 0xFF;
@@ -55,7 +55,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 			if (threadPosInRow == 0) {
 				// Store as uint16_t to handle both BK=8 and BK=16
-				reinterpret_cast<uint16_t*>(A_LIST)[row * numKBlocks + kBlock] = mask;
+				A_LIST[row * numKBlocks + kBlock] = mask;
 			}
 		}
 	}

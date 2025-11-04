@@ -5,7 +5,7 @@
 #include <cuda.h>
 #include <cassert>
 #include <cuda_runtime.h>
-#include "../utils.cuh"
+#include "../include/utils.cuh"
 
 template <const int BM, const int BN, const int BK, const int TM>
 __global__ void one_blocktiling(int M, int N, int K, const float *A, const float *B, float *C) {

@@ -1,8 +1,6 @@
 #pragma once
 
-/* Kernel #10, Warptiling (break blocks down even further by controlling warps) */
-
-#include "utils.cuh"
+#include "../../include/utils.cuh"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -11,44 +9,8 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
-//#include <unrolled_kernels.cuh>
-
-/* How should this work?
-   We calculate the pattern in here?
-       Slow, this is not the solution since we will be shuffling
-	   sparsity anyways beforehand
-   We know sparsity beforehand and just run the switch statement 
- 	   How would this work?
-*/
-/*
-__device__ inline void switch_table (int wSubRowIdx, int wSubColIdx,
-								int WNITER, float regM_val, float* regN,
-										float* threadResults) {
-	const int regNBase = wSubColIdx * 8;
-	const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-		
-	switch (sparsity) {
-		case 0:
-			break;
-		case 1:
-		case 255:
-
-	}
-
-}
-*/
-
-/*
- * @tparam BM The threadblock size for M dimension SMEM caching.
- * @tparam BN The threadblock size for N dimension SMEM caching.
- * @tparam BK The threadblock size for K dimension SMEM caching.
- * @tparam WM M dim of continuous tile computed by each warp
- * @tparam WN N dim of continuous tile computed by each warp
- * @tparam WMITER The number of subwarp tiling steps in M dimension.
- * @tparam WNITER The number of subwarp tiling steps in N dimension.
- * @tparam TM The per-thread tile size for M dimension.
- * @tparam TN The per-thread tile size for N dimension.
- */
+// ESMM Kernel: Warp-tiled sparse matrix multiplication
+// Uses metadata-driven computation to skip zero elements in A matrix
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)

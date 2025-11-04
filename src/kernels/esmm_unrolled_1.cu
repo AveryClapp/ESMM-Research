@@ -2,7 +2,7 @@
 
 /* Fully unrolled kernels for SIZE=6,4,2,1 with innermost loop unrolled */
 
-#include "../utils.cuh"
+#include "../../include/utils.cuh"
 #include <cuda_runtime.h>
 
 // ============================================================================

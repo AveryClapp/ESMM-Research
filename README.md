@@ -11,13 +11,18 @@ Detailed walkthrough of our current kernel [here](https://github.com/AveryClapp/
 
 ```
 ├── driver.cu                    # Main test driver and benchmark harness
-├── runners.cuh                  # Kernel wrapper functions and execution logic
-├── utils.cuh                    # Utility functions, error handling, and matrix generation
-├── esmm.cu                      # Main ESMM (Efficient Sparse Matrix Multiplication) kernel
-├── esmm_offsets.cu		         # ESMM with A sparsity encoded in a list
-├── esmm_unrolled/		         # Collection of kernels with hardcoded A Sparsity optimizations
+├── src/                         # Source code
+│   ├── kernels/                 # CUDA kernel implementations
+│   └── preprocessors/           # Matrix preprocessing kernels
+├── include/                     # Header files (.cuh)
+├── tests/                       # Test programs
+├── scripts/                     # Python utilities and code generation
+├── build/                       # Compiled binaries (gitignored)
+├── profiles/                    # Profiling outputs (gitignored)
+├── docs/                        # Documentation and visualizations
 ├── old_kernels/                 # Progressive kernel development hierarchy
-├── images/                      # Architecture diagrams and visualizations
+├── tuning/                      # Autotuning scripts
+└── tuner_results/               # Autotuning results
 ```
 
 ## Core Components
@@ -38,30 +43,6 @@ Detailed walkthrough of our current kernel [here](https://github.com/AveryClapp/
 - **Data Generation**: Pattern-based sparse matrix initialization
 - **Performance Macros**: High-resolution timing infrastructure (`SETUP`, `START`, `END`, `RESULTS`)
 - **Pattern Processing**: 8-element sparsity pattern handling
-
-### **Progressive Optimization Pipeline**
-The `old_kernels/` directory implements a systematic optimization progression:
-
-1. **Baseline** (`basic.cu`): Naive thread-per-element approach
-2. **Memory Optimization** (`gmem_coalesce.cu`): Coalesced global memory access
-3. **Cache Utilization** (`smem_blocking.cu`): Shared memory blocking for data reuse
-4. **Thread-Level Tiling** (`1D_Blocktiling.cu`): Multiple outputs per thread
-5. **Advanced Tiling** (`2D_Blocktiling.cu`): 2D register blocking for compute intensity
-6. **Vectorization** (`vectorized_blocktiling.cu`): SIMD memory operations
-7. **Warp Specialization** (`warptiling.cu`): Warp-level cooperative computation
-8. **Warp Skipping** (`esmm_warpskipping.cu`): First attempt at taking advantage of A Sparsity on a warp-level
-9. **Double Buffering** (`esmm_buffered.cu`): Experimental approach to ping-ponging memory and compute loads
-
-### **Sparse Kernels**
-- **ESMM** (`esmm.cu`): Main sparse kernel with pattern detection
-- **ESMM List Offsets** (`esmm_offsets.cu`): Derivative of main sparse kernel that uses a preloaded list for A-sparisty
-- **ESMM Unrolled Offsets** (`esmm_unrolled/`): Collection of various unrolled kernels to test list overhead on A-Sparsity
-
-## Current Work:
-1. Build out A Preprocessing step
-	- Take a look at launch bounds and dimensions
-1. Investigate improvement dropoff at high sparsity levels
-1. Experiment w/ the dispatch process
 
 ## ESMM Kernel walkthrough
 

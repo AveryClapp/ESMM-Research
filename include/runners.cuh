@@ -1,30 +1,32 @@
 #pragma once
 #include "utils.cuh"
-#include "./old_kernels/1D_Blocktiling.cu"
-#include "./old_kernels/2D_Blocktiling.cu"
-#include "./old_kernels/basic.cu"
-#include "./old_kernels/gmem_coalesce.cu"
-#include "./old_kernels/smem_blocking.cu"
-#include "./old_kernels/vectorized_blocktiling.cu"
-#include "./old_kernels/warptiling.cu"
-#include "./old_kernels/1d_warptiling.cu"
-#include "./old_kernels/1d_warptiling_tm.cu"
-#include "./old_kernels/esmm_warpskipping.cu"
-#include "./old_kernels/esmm_buffered.cu"
-#include "./old_kernels/1D_vec.cu"
-#include "./esmm.cu"
-#include "./esmm_offsets.cu"
-#include "./esmm_preprocessed.cu"
-#include "./esmm_preprocessed_rowlevel.cu"
-#include "./esmm_unrolled/esmm_unrolled_8.cu"
-#include "./esmm_unrolled/esmm_unrolled_6.cu"
-#include "./esmm_unrolled/esmm_unrolled_4.cu"
-#include "./esmm_unrolled/esmm_unrolled_2.cu"
-#include "./esmm_unrolled/esmm_unrolled_1.cu"
-#include "./preprocessors/a_preprocessor.cu"
-#include "./preprocessors/a_preprocessor_rowlevel.cu"
-#include "./preprocessors/b_preprocessor.cu"
-#include "./preprocess_params.cuh"
+#include "../old_kernels/1D_Blocktiling.cu"
+#include "../old_kernels/2D_Blocktiling.cu"
+#include "../old_kernels/basic.cu"
+#include "../old_kernels/gmem_coalesce.cu"
+#include "../old_kernels/smem_blocking.cu"
+#include "../old_kernels/vectorized_blocktiling.cu"
+#include "../old_kernels/warptiling.cu"
+#include "../old_kernels/1d_warptiling.cu"
+#include "../old_kernels/1d_warptiling_tm.cu"
+#include "../old_kernels/esmm_warpskipping.cu"
+#include "../old_kernels/esmm_buffered.cu"
+#include "../old_kernels/1D_vec.cu"
+#include "../src/kernels/esmm.cu"
+#include "../src/kernels/esmm_offsets.cu"
+#include "../src/kernels/esmm_preprocessed.cu"
+#include "../src/kernels/esmm_preprocessed_rowlevel.cu"
+#include "../src/kernels/esmm_pattern_specialized.cu"
+#include "../src/kernels/esmm_unrolled_8.cu"
+#include "../src/kernels/esmm_unrolled_6.cu"
+#include "../src/kernels/esmm_unrolled_4.cu"
+#include "../src/kernels/esmm_unrolled_2.cu"
+#include "../src/kernels/esmm_unrolled_1.cu"
+#include "../src/preprocessors/a_preprocessor.cu"
+#include "../src/preprocessors/a_preprocessor_rowlevel.cu"
+#include "../src/preprocessors/a_preprocessor_rowlevel_optimized.cu"
+#include "../src/preprocessors/b_preprocessor.cu"
+#include "preprocess_params.cuh"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -842,27 +844,23 @@ void free_preprocess_result_rowlevel(PreprocessResultRowLevel& result) {
 }
 
 PreprocessResultRowLevel run_a_preprocess_rowlevel(float *d_A, int M, int K, int BK) {
-    constexpr int NUM_THREADS = 512;
+    constexpr int NUM_THREADS = 256;
     constexpr int WARP_SIZE = 32;
-    constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
 
     dim3 blockDim(NUM_THREADS);
 
-    // Calculate rows per block based on BK
-    // BK=8: 4 rows/warp * 8 warps = 32 rows/block
-    // BK=16: 2 rows/warp * 8 warps = 16 rows/block
-    const int rowsPerWarp = WARP_SIZE / BK;
-    const int rowsPerBlock = rowsPerWarp * NUM_WARPS;
-    dim3 gridDim(CEIL_DIV(M, rowsPerBlock));
-
     const int numKBlocks = K / BK;
-    const int totalSize = M * numKBlocks;  // One uint16_t per row per K-block
+    const int totalSize = M * numKBlocks;
+    const int ROWS_PER_WARP = WARP_SIZE / BK;
+    const int ROWS_PER_BLOCK = ROWS_PER_WARP * (NUM_THREADS / WARP_SIZE);
+    dim3 gridDim(CEIL_DIV(M, ROWS_PER_BLOCK));
+
 
     PreprocessResultRowLevel result;
     result.totalSize = totalSize;
     result.h_list = nullptr;
-    cudaMalloc(&result.d_list, totalSize * sizeof(uint16_t));  // Changed to uint16_t
-    cudaMemset(result.d_list, 0, totalSize * sizeof(uint16_t));
+    cudaMalloc(&result.d_list, totalSize * sizeof(uint8_t));
+    cudaMemset(result.d_list, 0, totalSize * sizeof(uint8_t));
 
     if (BK == 8) {
         preprocess_A_rowlevel<8, NUM_THREADS>
@@ -880,14 +878,14 @@ PreprocessResultRowLevel run_a_preprocess_rowlevel(float *d_A, int M, int K, int
 
 bool run_esmm_preprocessed_rowlevel(int rows, int cols, int inners, float *d_A, float *d_B,
                                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-  // Main ESMM kernel config - preprocessing uses 512 threads and BK=16 from autotuner
-  const uint NUM_THREADS = 128;
-  const uint BN = 64;
-  const uint BM = 64;
-  const uint BK = 16;  // Must match preprocessing BK
-  const uint WN = 32;
+  // Optimized config with larger tiles (now that shared mem is freed up!)
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
   const uint WM = 32;
-  const uint WNITER = 1;
+  const uint WNITER = 4;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -898,14 +896,10 @@ bool run_esmm_preprocessed_rowlevel(int rows, int cols, int inners, float *d_A, 
   // Run row-level preprocessing
   PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
 
-  // Calculate dynamic shared memory size for masks
-  const int numKBlocks = inners / BK;
-  const size_t sharedMemSize = BM * numKBlocks * sizeof(uint16_t);
-
   // Run ESMM with row-level preprocessing
   for (int i = 0; i < runs; i++) {
     esmm_preprocessed_rowlevel<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim, sharedMemSize>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
   }
   cudaDeviceSynchronize();
 
@@ -925,15 +919,14 @@ bool run_esmm_preprocessed_rowlevel(int rows, int cols, int inners, float *d_A, 
 
 bool run_esmm_preprocessed_rowlevel_no_check(int rows, int cols, int inners, float *d_A,
                                              float *d_B, float *d_C, int runs) {
-  // Main ESMM kernel config - preprocessing uses 512 threads and BK=16 from autotuner
-  // Using BM=BN=64 for higher K limit (up to 5,120 vs 2,048)
+  // Optimized config with larger tiles (now that shared mem is freed up!)
   const uint NUM_THREADS = 256;
-  const uint BN = 64;
-  const uint BM = 64;
-  const uint BK = 16;  // Must match preprocessing BK
-  const uint WN = 16;  // (64/32)*(64/16)*32 = 256 threads
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
   const uint WM = 32;
-  const uint WNITER = 1;  // WMITER = (32*16)/(32*1*8*1) = 2
+  const uint WNITER = 4;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -944,14 +937,81 @@ bool run_esmm_preprocessed_rowlevel_no_check(int rows, int cols, int inners, flo
   // Run row-level preprocessing
   PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
 
-  // Calculate dynamic shared memory size for masks
-  const int numKBlocks = inners / BK;
-  const size_t sharedMemSize = BM * numKBlocks * sizeof(uint16_t);
-
   // Run ESMM with row-level preprocessing
   for (int i = 0; i < runs; i++) {
     esmm_preprocessed_rowlevel<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim, sharedMemSize>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+  }
+  cudaDeviceSynchronize();
+
+  free_preprocess_result_rowlevel(result);
+  return true;
+}
+
+// Pattern-specialized kernel with zero-overhead sparsity
+bool run_esmm_pattern_specialized(int rows, int cols, int inners, float *d_A, float *d_B,
+                                   float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;  // Pattern functions only support BK=8
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Run row-level preprocessing
+  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
+
+  // Run ESMM with pattern-specialized computation
+  for (int i = 0; i < runs; i++) {
+    esmm_pattern_specialized<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+  }
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_preprocess_result_rowlevel(result);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_preprocess_result_rowlevel(result);
+  return passed;
+}
+
+bool run_esmm_pattern_specialized_no_check(int rows, int cols, int inners, float *d_A,
+                                            float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;  // Pattern functions only support BK=8
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Run row-level preprocessing
+  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
+
+  // Run ESMM with pattern-specialized computation
+  for (int i = 0; i < runs; i++) {
+    esmm_pattern_specialized<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
   }
   cudaDeviceSynchronize();
 

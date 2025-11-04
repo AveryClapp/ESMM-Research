@@ -1,18 +1,14 @@
 #pragma once
 
-/* ESMM Kernel with Preprocessing - Uses bitmask metadata for A sparsity */
+/* ESMM Kernel with Row-Level Preprocessing - Config Agnostic */
 
-#include "utils.cuh"
-#include "preprocess_params.cuh"
-#include <algorithm>
-#include <cassert>
-#include <cstdio>
-#include <cstdlib>
-#include <cstdint>
-#include <cublas_v2.h>
+#include "../../include/utils.cuh"
 #include <cuda_runtime.h>
 
 /*
+ * Uses row-level bitmask metadata - works with ANY kernel config!
+ * Mask layout: row * numKBlocks + kBlock
+ *
  * @tparam BM The threadblock size for M dimension SMEM caching.
  * @tparam BN The threadblock size for N dimension SMEM caching.
  * @tparam BK The threadblock size for K dimension SMEM caching.
@@ -26,7 +22,7 @@
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
 		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	esmm_preprocessed(int M, int N, int K, float *A, float *B, float *C, int* A_LIST) {
+	esmm_preprocessed_rowlevel(int M, int N, int K, float *A, float *B, float *C, uint8_t* A_LIST) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
@@ -37,20 +33,18 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 	constexpr uint WSUBM = WM / WMITER;
 	constexpr uint WSUBN = WN / WNITER;
-	constexpr uint NUM_WARP_ROWS = (BM + WM - 1) / WM;
 
 	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
 	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-	__shared__ float As[BN * BK];
-	__shared__ float Bs[BM * BK];
+	const uint numKBlocks = K / BK;
 
-	// Cache for sparsity masks
-	// Layout: kBlock * NUM_WARP_ROWS * WMITER + warpRow * WMITER + wSubRowIdx
-	constexpr uint numKBlocks = 1024 / BK;  // Hardcoded for now, matches inners=1024
-	constexpr uint numMasksPerBlock = numKBlocks * NUM_WARP_ROWS * WMITER;
-	__shared__ uint8_t sparsityMasks[numMasksPerBlock];
+	__shared__ float As[BM * BK];
+	__shared__ float Bs[BN * BK];
+
+	// Only cache masks for current tile rows (not all K-blocks!)
+	__shared__ uint8_t rowMasks[BM];
 
 	A += cRow * BM * K;
 	B += cCol * BN;
@@ -67,45 +61,27 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	float regM[WMITER * TM] = {0.0};
 	float regN[WNITER * TN] = {0.0};
 
-	// Load all sparsity masks for this block row into shared memory
-	// Each mask is packed: 4 masks per int
-	// Layout: kBlock * NUM_WARP_ROWS * WMITER + warpRow * WMITER + wSubRowIdx
-	constexpr uint numIntsPerBlock = (numMasksPerBlock + 3) / 4;
-
-	const uint blockOffset = cRow * numIntsPerBlock;
-
-	// Load packed masks and unpack them
-	for (uint i = threadIdx.x; i < numIntsPerBlock; i += blockDim.x) {
-		int packed = A_LIST[blockOffset + i];
-		// Unpack 4 masks from this int
-		for (int j = 0; j < 4 && (i * 4 + j) < numMasksPerBlock; j++) {
-			sparsityMasks[i * 4 + j] = (packed >> (j * 8)) & 0xFF;
-		}
-	}
-	__syncthreads();
+	const uint globalRowBase = cRow * BM;
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		const uint kBlock = bkIdx / BK;
 
-		// Get sparsity mask for this K-block, warp row, and first subrow
-		// Each warp row has WMITER masks, one per sub-row
-		// For simplicity, use the OR of all WMITER masks for this warp row
-		uint8_t mask = 0;
+		// Load masks for current k-block only
+		for (uint i = threadIdx.x; i < BM; i += blockDim.x) {
+			rowMasks[i] = A_LIST[(globalRowBase + i) * numKBlocks + kBlock];
+		}
+		__syncthreads();
+
+		// Aggregate mask for this warp's rows
+		uint16_t warpMask = 0;
 		for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-			const uint maskIdx = kBlock * NUM_WARP_ROWS * WMITER + warpRow * WMITER + wSubRowIdx;
-			if (maskIdx < numMasksPerBlock) {
-				mask |= sparsityMasks[maskIdx];
+			const uint localRow = warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM;
+			if (localRow < BM) {
+				warpMask |= rowMasks[localRow];
 			}
 		}
 
-		// Skip entirely zero blocks
-		if (mask == 0) {
-			A += BK;
-			B += BK * N;
-			continue;
-		}
-
-		// Load A tile (always load, but could be optimized)
+		// Load A tile
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
@@ -115,10 +91,10 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
 		}
 
-		// Conditionally load B rows based on mask
+		// Conditionally load B rows based on warp mask
 		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
 			int bRow = innerRowB + offset;
-			if (mask & (1 << bRow)) {
+			if (warpMask & (1 << bRow)) {
 				reinterpret_cast<float4 *>(
 					&Bs[bRow * BN + innerColB * 4])[0] =
 					reinterpret_cast<const float4 *>(
@@ -129,15 +105,14 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 		// Compute only for non-zero columns
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			// Skip zero columns
-			if (!(mask & (1 << dotIdx))) continue;
+			// Skip if this column is zero for all rows this warp processes
+			if (!(warpMask & (1 << dotIdx))) continue;
 
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];
 			}
 
-			/* Load 8 values into the register */
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 				regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
@@ -169,6 +144,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 		__syncthreads();
 	}
 
+	// Write results back
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;

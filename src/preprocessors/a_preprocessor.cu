@@ -2,7 +2,7 @@
 
 /* Preprocessor for A matrix to encode horizontal sparsity */
 
-#include "../utils.cuh"
+#include "../../include/utils.cuh"
 #include <cuda_runtime.h>
 
 	template <const int BM, const int BN, const int BK, const int WM, const int WN, const int WNITER, const int TM, const int TN, const int NUM_THREADS>

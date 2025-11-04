@@ -85,7 +85,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			}
 		}
 
-		// Load A tile (unconditionally - could optimize this too)
+		// Load A tile
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
@@ -95,15 +95,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
 		}
 
-		// Conditionally load B rows based on warp mask
+		// Load B tile (unconditionally - warpMask is per-warp, but Bs is shared!)
 		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
-			int bRow = innerRowB + offset;
-			if (warpMask & (1 << bRow)) {
-				reinterpret_cast<float4 *>(
-					&Bs[bRow * BN + innerColB * 4])[0] =
-					reinterpret_cast<const float4 *>(
-						&B[bRow * N + innerColB * 4])[0];
-			}
+			reinterpret_cast<float4 *>(
+				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
+				reinterpret_cast<const float4 *>(
+					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
 

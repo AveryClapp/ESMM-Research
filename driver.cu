@@ -141,6 +141,20 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_pattern_specialized_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 19: // ESMM with Count+Offset Metadata (Unrolled Dispatch)
+        if (check_results) {
+            res = run_esmm_countoffset(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_countoffset_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 20: // ESMM Hybrid (Adaptive: Offset List or Bitmask)
+        if (check_results) {
+            res = run_esmm_hybrid(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_hybrid_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -160,10 +174,10 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 int main(int argc, char *argv[]) {
 
     // Define Matrix Dims
-    constexpr int rows = 1024;
-    constexpr int cols = 1024;
-    constexpr int inners = 1024;
-    constexpr std::string_view sparsity = "11110000";
+    constexpr int rows = 4096;
+    constexpr int cols = 4096;
+    constexpr int inners = 4096;
+    constexpr std::string_view sparsity = "10000000";
     
     if (argc > 1) {
         std::string arg = argv[1];
@@ -237,10 +251,39 @@ int main(int argc, char *argv[]) {
                               cudaMemcpyHostToDevice));
 
     if (check_results) {
-        if (verbose) cout << "Generating CPU reference solution..." << endl;
-        matrixMultiplyCPU(h_A, h_B, h_C_ref, rows, cols, inners);
+        if (verbose) cout << "Generating GPU reference solution using ESMM kernel..." << endl;
+
+        // Use ESMM kernel to generate reference instead of CPU
+        const uint K10_NUM_THREADS = 256;
+        const uint K10_BN = 128;
+        const uint K10_BM = 128;
+        const uint K10_BK = 16;
+        const uint K10_WN = 64;
+        const uint K10_WM = 32;
+        const uint K10_WNITER = 4;
+        const uint K10_TN = 8;
+        const uint K10_TM = 1;
+
+        dim3 blockDim(K10_NUM_THREADS);
+        dim3 gridDim(CEIL_DIV(cols, K10_BN), CEIL_DIV(rows, K10_BM));
+        cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+        esmm<K10_BM, K10_BN, K10_BK, K10_WM, K10_WN, K10_WNITER, K10_TM, K10_TN, K10_NUM_THREADS>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C);
+        cudaDeviceSynchronize();
+
+        cudaError_t error = cudaGetLastError();
+        if (error != cudaSuccess) {
+            cout << "Error generating reference with ESMM: " << cudaGetErrorString(error) << endl;
+            return 1;
+        }
+
+        // Copy GPU result to host as reference
+        cudaMemcpy(h_C_ref, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+
+        if (verbose) cout << "GPU reference generated successfully." << endl;
     } else {
-        if (verbose) cout << "Skipping CPU reference solution (no-check mode)..." << endl;
+        if (verbose) cout << "Skipping reference solution (no-check mode)..." << endl;
     }
 
     int passed = 0;

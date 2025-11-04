@@ -159,7 +159,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					multiply_half(wSubRowIdx, wSubColIdx, WNITER,
+					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
 					regM[wSubRowIdx], regN, threadResults);
 				}
 			}

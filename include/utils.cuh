@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 18; i++) {
+    for (int i = 1; i <= 20; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 18; i++) {
+    for (int i = start; i <= end && i <= 20; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 18) {
+    if (kernel >= 1 && kernel <= 20) {
       kernels.push_back(kernel);
     }
   }
@@ -71,6 +71,8 @@ const char* get_kernel_name(int kernel_choice) {
     case 16: return "ESMM Preprocessed (Bitmask)";
     case 17: return "ESMM Preprocessed (Row-Level, Config-Agnostic)";
     case 18: return "ESMM Pattern-Specialized (Zero Overhead)";
+    case 19: return "ESMM Count+Offset (Unrolled Dispatch)";
+    case 20: return "ESMM Hybrid (Adaptive: Offset List or Bitmask)";
     default: return "Unknown Kernel";
   }
 }
@@ -98,6 +100,7 @@ void print_usage(const char* program_name) {
   cout << "  " << program_name << " 6 10 --verbose --no-check" << endl;
   cout << "  " << program_name << " 1-5 1 --check-results" << endl;
   cout << "  " << program_name << " all 1 -v -n" << endl;
+  cout << "  " << program_name << " 19 1 --verbose  # Test new count+offset kernel" << endl;
 }
 
 

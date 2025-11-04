@@ -120,35 +120,14 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         }
         res = true; // Assume cuBLAS always succeeds
         break;
-    case 16: // ESMM with Preprocessing (Bitmask)
-        if (check_results) {
-            res = run_esmm_preprocessed(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_preprocessed_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 17: // ESMM with Row-Level Preprocessing (Config-Agnostic)
-        if (check_results) {
-            res = run_esmm_preprocessed_rowlevel(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_preprocessed_rowlevel_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 18: // ESMM with Pattern-Specialized Computation (Zero Overhead)
+    case 16: // ESMM Pattern-Specialized (Zero Overhead)
         if (check_results) {
             res = run_esmm_pattern_specialized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_pattern_specialized_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 19: // ESMM with Count+Offset Metadata (Unrolled Dispatch)
-        if (check_results) {
-            res = run_esmm_countoffset(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_countoffset_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 20: // ESMM Hybrid (Adaptive: Offset List or Bitmask)
+    case 17: // ESMM Block-wise Uniform (Per-Warp Pattern Encoding)
         if (check_results) {
             res = run_esmm_hybrid(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
@@ -174,17 +153,10 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 int main(int argc, char *argv[]) {
 
     // Define Matrix Dims
-    constexpr int rows = 4096;
-    constexpr int cols = 4096;
-    constexpr int inners = 4096;
+    constexpr int rows = 2048;
+    constexpr int cols = 2048;
+    constexpr int inners = 2048;
     constexpr std::string_view sparsity = "10000000";
-    
-    if (argc > 1) {
-        std::string arg = argv[1];
-        if (arg == "0" || arg == "0a" || arg == "0b") {
-            handle_preprocessing_commands(argc, argv, rows, sparsity);
-        }
-    }
 
     // Default values
     std::vector<int> kernel_choices = {13};

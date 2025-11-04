@@ -1,317 +1,254 @@
 #pragma once
 
-/* ESMM Hybrid Kernel: Combines offset list (K13) with pattern-specialized (K18) */
+/*
+ * ============================================================================
+ * Kernel 20: ESMM Block-wise Uniform
+ * ============================================================================
+ *
+ * Strategy:
+ *   Each 8×32 block (BK × WM) encodes one sparsity pattern. This aligns
+ *   perfectly with warp execution: 32 threads process 32 rows together,
+ *   sharing the same pattern for optimal compile-time unrolling.
+ *
+ * Architecture:
+ *   - Preprocessing: OR together sparsity across 32 rows → single 8-bit pattern
+ *   - Runtime: Load pattern, reconstruct offsets, switch on count
+ *   - Computation: Template dispatch enables full loop unrolling
+ *
+ * Performance Characteristics:
+ *   - Memory: 1 byte per 8×32 block (~64 KB for 4096×4096)
+ *   - Divergence: Zero (warp-uniform pattern)
+ *   - Overhead: Minimal (single byte load + bit manipulation)
+ *
+ * Best for:
+ *   Random sparsity with block-level uniformity (e.g., structured pruning,
+ *   activation sparsity in transformer models)
+ */
 
 #include "../../include/utils.cuh"
+#include "../../include/metadata.cuh"
 #include "../preprocessors/a_preprocessor_hybrid.cu"
 #include <cuda_runtime.h>
 
-/*
- * Hybrid kernel with two modes:
- *
- * MODE 1 - UNIFORM PATTERN (isUniform=true):
- *   - Uses global offset list (16 bytes total!)
- *   - Template SIZE parameter for compile-time unrolling
- *   - Zero metadata loads from global memory
- *   - Extremely fast for uniform sparsity
- *
- * MODE 2 - NON-UNIFORM PATTERN (isUniform=false):
- *   - Falls back to per-row bitmasks (1 byte/row/K-block)
- *   - Still better than count+offset (1 byte vs 5 bytes)
- *   - Handles arbitrary per-row variation
- */
-
 // ============================================================================
-// MODE 1: UNIFORM PATTERN KERNEL (Uses global offset list)
+// Helper templates for compile-time unrolled computation
 // ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
-		const int WNITER, const int TM, const int TN, const int NUM_THREADS, const int SIZE>
-__global__ void __launch_bounds__(NUM_THREADS)
-	esmm_hybrid_uniform(int M, int N, int K, float *A, float *B, float *C,
-	                    const uint8_t* __restrict__ globalOffsets) {
+          const int WNITER, const int TM, const int TN, const int SIZE>
+__device__ void compute_sparse_block(
+    const uint8_t* offsets,
+    const uint warpRow, const uint warpCol,
+    const uint threadRowInWarp, const uint threadColInWarp,
+    float* As, float* Bs,
+    float* threadResults) {
 
-	const uint cRow = blockIdx.y;
-	const uint cCol = blockIdx.x;
+    constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+    constexpr uint WSUBM = WM / WMITER;
+    constexpr uint WSUBN = WN / WNITER;
 
-	const uint warpIdx = threadIdx.x / WARPSIZE;
-	const uint warpCol = warpIdx % (BN / WN);
-	const uint warpRow = warpIdx / (BN / WN);
+    float regM[WMITER * TM];
+    float regN[WNITER * TN];
 
-	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
-	constexpr uint WSUBM = WM / WMITER;
-	constexpr uint WSUBN = WN / WNITER;
+    #pragma unroll
+    for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
+        const uint8_t dotIdx = offsets[sparse_idx];
 
-	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
-	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
-	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
+        // Load from shared memory A
+        #pragma unroll
+        for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+            regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+                wSubRowIdx * WSUBM + threadRowInWarp * TM];
+        }
 
-	__shared__ float As[BM * BK];
-	__shared__ float Bs[BN * BK];
+        // Load from shared memory B
+        #pragma unroll
+        for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+            regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
+            regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
+            regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
+            regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
+            regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
+            regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
+            regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
+            regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol *
+                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+        }
 
-	A += cRow * BM * K;
-	B += cCol * BN;
-	C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
-
-	const uint innerRowA = threadIdx.x / (BK / 4);
-	const uint innerColA = threadIdx.x % (BK / 4);
-	constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
-	const uint innerRowB = threadIdx.x / (BN / 4);
-	const uint innerColB = threadIdx.x % (BN / 4);
-	constexpr uint rowStrideB = NUM_THREADS / (BN / 4);
-
-	float threadResults[WMITER * TM * WNITER * TN] = {0.0};
-	float regM[WMITER * TM];
-	float regN[WNITER * TN];
-
-	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		// Load A tile
-		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
-			const float4 tmp = reinterpret_cast<const float4 *>(
-				&A[(innerRowA + offset) * K + innerColA * 4])[0];
-			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-			As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
-		}
-
-		// Load B tile
-		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
-			reinterpret_cast<float4 *>(
-				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-				reinterpret_cast<const float4 *>(
-					&B[(innerRowB + offset) * N + innerColB * 4])[0];
-		}
-		__syncthreads();
-
-		// *** MAGIC: Compile-time unrolled loop using global offsets ***
-		// For SIZE=1: Unrolls to single iteration
-		// For SIZE=4: Unrolls to 4 iterations
-		// Zero runtime overhead!
-		#pragma unroll
-		for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
-			const uint8_t dotIdx = globalOffsets[sparse_idx];
-
-			#pragma unroll
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
-					wSubRowIdx * WSUBM + threadRowInWarp * TM];
-			}
-
-			#pragma unroll
-			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-				regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-				regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-				regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-				regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-				regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-				regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-				regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
-			}
-
-			#pragma unroll
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				#pragma unroll
-				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-						regM[wSubRowIdx], regN, threadResults);
-				}
-			}
-		}
-
-		A += BK;
-		B += BK * N;
-		__syncthreads();
-	}
-
-	// Write results back
-	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
-			for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
-				for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
-					float4 tmp;
-					const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
-						wSubColIdx * TN + resIdxN;
-					tmp.x = threadResults[i + 0];
-					tmp.y = threadResults[i + 1];
-					tmp.z = threadResults[i + 2];
-					tmp.w = threadResults[i + 3];
-					reinterpret_cast<float4 *>(
-						&C_interim[(threadRowInWarp * TM + resIdxM) * N +
-						threadColInWarp * TN + resIdxN])[0] = tmp;
-				}
-			}
-		}
-	}
+        // Compute outer product
+        #pragma unroll
+        for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+            #pragma unroll
+            for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+                multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
+                    regM[wSubRowIdx], regN, threadResults);
+            }
+        }
+    }
 }
 
 // ============================================================================
-// MODE 2: NON-UNIFORM PATTERN KERNEL (Uses per-row bitmasks)
+// Main kernel: Block-wise uniform sparsity
 // ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
-		const int WNITER, const int TM, const int TN, const int NUM_THREADS>
+          const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-	esmm_hybrid_nonuniform(int M, int N, int K, float *A, float *B, float *C,
-	                       const uint8_t* __restrict__ rowMasks) {
+    esmm_hybrid_blockwise(int M, int N, int K, float *A, float *B, float *C,
+                          const uint8_t* __restrict__ blockPatterns,
+                          const int numKBlocks) {
 
-	const uint cRow = blockIdx.y;
-	const uint cCol = blockIdx.x;
+    const uint cRow = blockIdx.y;
+    const uint cCol = blockIdx.x;
 
-	const uint warpIdx = threadIdx.x / WARPSIZE;
-	const uint warpCol = warpIdx % (BN / WN);
-	const uint warpRow = warpIdx / (BN / WN);
+    const uint warpIdx = threadIdx.x / WARPSIZE;
+    const uint warpCol = warpIdx % (BN / WN);
+    const uint warpRow = warpIdx / (BN / WN);
 
-	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
-	constexpr uint WSUBM = WM / WMITER;
-	constexpr uint WSUBN = WN / WNITER;
+    constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+    constexpr uint WSUBM = WM / WMITER;
+    constexpr uint WSUBN = WN / WNITER;
 
-	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
-	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
-	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
+    const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
+    const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
+    const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-	const uint numKBlocks = K / BK;
+    __shared__ float As[BM * BK];
+    __shared__ float Bs[BN * BK];
 
-	__shared__ float As[BM * BK];
-	__shared__ float Bs[BN * BK];
-	__shared__ uint8_t tileMasks[BM];
+    A += cRow * BM * K;
+    B += cCol * BN;
+    C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
 
-	A += cRow * BM * K;
-	B += cCol * BN;
-	C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
+    const uint innerRowA = threadIdx.x / (BK / 4);
+    const uint innerColA = threadIdx.x % (BK / 4);
+    constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
+    const uint innerRowB = threadIdx.x / (BN / 4);
+    const uint innerColB = threadIdx.x % (BN / 4);
+    constexpr uint rowStrideB = NUM_THREADS / (BN / 4);
 
-	const uint innerRowA = threadIdx.x / (BK / 4);
-	const uint innerColA = threadIdx.x % (BK / 4);
-	constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
-	const uint innerRowB = threadIdx.x / (BN / 4);
-	const uint innerColB = threadIdx.x % (BN / 4);
-	constexpr uint rowStrideB = NUM_THREADS / (BN / 4);
+    float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-	float threadResults[WMITER * TM * WNITER * TN] = {0.0};
-	float regM[WMITER * TM];
-	float regN[WNITER * TN];
+    // Calculate global warp row for pattern lookup
+    const uint globalWarpRow = cRow * (BM / WM) + warpRow;
 
-	const uint globalRowBase = cRow * BM;
+    for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
+        const uint kBlock = bkIdx / BK;
 
-	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		const uint kBlock = bkIdx / BK;
+        // *** Load pattern for this warp tile's 8×32 block ***
+        const uint blockId = globalWarpRow * numKBlocks + kBlock;
+        const uint8_t pattern = blockPatterns[blockId];
 
-		// Load masks for current k-block
-		for (uint i = threadIdx.x; i < BM; i += blockDim.x) {
-			tileMasks[i] = rowMasks[(globalRowBase + i) * numKBlocks + kBlock];
-		}
-		__syncthreads();
+        // *** Reconstruct offsets from pattern ***
+        uint8_t offsets[8];
+        uint8_t count = 0;
+        #pragma unroll
+        for (int i = 0; i < BK; i++) {
+            if (pattern & (1 << i)) {
+                offsets[count++] = i;
+            }
+        }
 
-		// Aggregate mask for this thread's rows
-		uint8_t threadMask = 0;
-		#pragma unroll
-		for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-			const uint localRow = warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM;
-			if (localRow < BM) {
-				threadMask |= tileMasks[localRow];
-			}
-		}
+        // Early exit if all zeros
+        if (count == 0) {
+            A += BK;
+            B += BK * N;
+            continue;
+        }
 
-		// Early exit if all zeros
-		if (threadMask == 0) {
-			A += BK;
-			B += BK * N;
-			__syncthreads();
-			continue;
-		}
+        // Load A tile
+        for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+            const float4 tmp = reinterpret_cast<const float4 *>(
+                &A[(innerRowA + offset) * K + innerColA * 4])[0];
+            As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+            As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+            As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+            As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+        }
 
-		// Load A tile
-		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
-			const float4 tmp = reinterpret_cast<const float4 *>(
-				&A[(innerRowA + offset) * K + innerColA * 4])[0];
-			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-			As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
-		}
+        // Load B tile
+        for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+            reinterpret_cast<float4 *>(
+                &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
+                reinterpret_cast<const float4 *>(
+                    &B[(innerRowB + offset) * N + innerColB * 4])[0];
+        }
+        __syncthreads();
 
-		// Load B tile
-		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
-			reinterpret_cast<float4 *>(
-				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-				reinterpret_cast<const float4 *>(
-					&B[(innerRowB + offset) * N + innerColB * 4])[0];
-		}
-		__syncthreads();
+        // *** MAGIC: Switch on count for compile-time unrolling ***
+        switch (count) {
+            case 1:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 1>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 2:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 2>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 3:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 3>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 4:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 4>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 5:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 5>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 6:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 6>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 7:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 7>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+            case 8:
+                compute_sparse_block<BM, BN, BK, WM, WN, WNITER, TM, TN, 8>(
+                    offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
+                    As, Bs, threadResults);
+                break;
+        }
 
-		// Compute using bitmask
-		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			if (!(threadMask & (1 << dotIdx))) continue;
+        A += BK;
+        B += BK * N;
+        __syncthreads();
+    }
 
-			#pragma unroll
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
-					wSubRowIdx * WSUBM + threadRowInWarp * TM];
-			}
-
-			#pragma unroll
-			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-				regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-				regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-				regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-				regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-				regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-				regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-				regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol *
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
-			}
-
-			#pragma unroll
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				#pragma unroll
-				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-						regM[wSubRowIdx], regN, threadResults);
-				}
-			}
-		}
-
-		A += BK;
-		B += BK * N;
-		__syncthreads();
-	}
-
-	// Write results back
-	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
-			for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
-				for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
-					float4 tmp;
-					const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
-						wSubColIdx * TN + resIdxN;
-					tmp.x = threadResults[i + 0];
-					tmp.y = threadResults[i + 1];
-					tmp.z = threadResults[i + 2];
-					tmp.w = threadResults[i + 3];
-					reinterpret_cast<float4 *>(
-						&C_interim[(threadRowInWarp * TM + resIdxM) * N +
-						threadColInWarp * TN + resIdxN])[0] = tmp;
-				}
-			}
-		}
-	}
+    // Write results back to global memory
+    for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+        for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+            float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
+            for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
+                for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
+                    float4 tmp;
+                    const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
+                        wSubColIdx * TN + resIdxN;
+                    tmp.x = threadResults[i + 0];
+                    tmp.y = threadResults[i + 1];
+                    tmp.z = threadResults[i + 2];
+                    tmp.w = threadResults[i + 3];
+                    reinterpret_cast<float4 *>(
+                        &C_interim[(threadRowInWarp * TM + resIdxM) * N +
+                        threadColInWarp * TN + resIdxN])[0] = tmp;
+                }
+            }
+        }
+    }
 }

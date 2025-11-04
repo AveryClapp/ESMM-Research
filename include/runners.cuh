@@ -1,5 +1,6 @@
 #pragma once
 #include "utils.cuh"
+#include "metadata.cuh"
 #include "../old_kernels/1D_Blocktiling.cu"
 #include "../old_kernels/2D_Blocktiling.cu"
 #include "../old_kernels/basic.cu"
@@ -14,21 +15,15 @@
 #include "../old_kernels/1D_vec.cu"
 #include "../src/kernels/esmm.cu"
 #include "../src/kernels/esmm_offsets.cu"
-#include "../src/kernels/esmm_preprocessed.cu"
-#include "../src/kernels/esmm_preprocessed_rowlevel.cu"
 #include "../src/kernels/esmm_pattern_specialized.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_8.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_6.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_4.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_2.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_1.cu"
-#include "../src/preprocessors/a_preprocessor.cu"
-#include "../src/preprocessors/a_preprocessor_rowlevel.cu"
-#include "../src/preprocessors/a_preprocessor_rowlevel_optimized.cu"
-#include "../src/preprocessors/a_preprocessor_countoffset.cu"
-#include "../src/preprocessors/b_preprocessor.cu"
-#include "../src/kernels/esmm_countoffset.cu"
 #include "../src/kernels/esmm_hybrid.cu"
+#include "../src/preprocessors/a_preprocessor_rowlevel.cu"
+#include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "preprocess_params.cuh"
 #include <chrono>
 #include <cublas_v2.h>
@@ -426,107 +421,9 @@ void run_cuBlas(int rows, int cols, int inners, float *d_A, float *d_B,
   cublasDestroy(handle);
 }
 
-void free_preprocess_result(PreprocessResult& result) {
-    if (result.d_list) cudaFree(result.d_list);
-    if (result.h_list) free(result.h_list);
-    result.d_list = nullptr;
-    result.h_list = nullptr;
-}
 
 
-PreprocessResult run_a_preprocess(float *d_A, int rows, int cols, int inners) {
 
-    using P = PreprocessParams;
-
-    dim3 blockDim(P::NUM_THREADS);
-    dim3 gridDim(1, CEIL_DIV(rows, P::BM));
-
-    const int denseListSize = P::denseListSize(inners);
-    const int totalSize = gridDim.y * denseListSize;
-
-    PreprocessResult result;
-    result.totalSize = totalSize;
-    result.h_list = nullptr;  // Initialize to nullptr to avoid double-free
-    cudaMalloc(&result.d_list, totalSize * sizeof(int));
-    cudaMemset(result.d_list, 0, totalSize * sizeof(int));
-
-    preprocess_A<
-        P::BM, P::BN, P::BK,
-        P::WM, P::WN, P::WNITER,
-        P::TM, P::TN,
-        P::NUM_THREADS
-    ><<<gridDim, blockDim>>>(rows, cols, inners, d_A, result.d_list);
-
-    cudaDeviceSynchronize();
-    return result;
-}
-
-bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check) {
-    const uint BM = 128, BK = 8, WMITER = 1, WSUBM = 32;
-
-    PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
-
-    result.h_list = (int*)calloc(result.totalSize, sizeof(int));
-    int* h_ALIST_ref = (int*)calloc(result.totalSize, sizeof(int));
-
-    cudaMemcpy(result.h_list, result.d_list, result.totalSize * sizeof(int), cudaMemcpyDeviceToHost);
-
-    float* h_A = (float*)malloc(rows * inners * sizeof(float));
-    cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
-    computeReferencePreprocessing(h_A, h_ALIST_ref, rows, inners, BM, BK, WMITER, WSUBM);
-    free(h_A);
-
-    bool passed = true;
-    if (check) {
-        passed = verifyPreprocessResults(result.h_list, h_ALIST_ref, result.totalSize);
-    }
-
-    free(h_ALIST_ref);
-    free_preprocess_result(result);
-
-    return passed;
-}
-
-bool run_esmm_preprocessed(int rows, int cols, int inners, float *d_A, float *d_B,
-                           float *d_C, float *h_C, float *h_C_ref, int runs) {
-  // Must match PreprocessParams exactly!
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 8;  // MUST match preprocessing!
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Run preprocessing
-  PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
-
-  // Run ESMM with preprocessing
-  for (int i = 0; i < runs; i++) {
-    esmm_preprocessed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
-  }
-  cudaDeviceSynchronize();
-
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    printf("CUDA error: %s\n", cudaGetErrorString(error));
-    free_preprocess_result(result);
-    return false;
-  }
-
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
-
-  free_preprocess_result(result);
-  return passed;
-}
 
 
 
@@ -798,159 +695,6 @@ bool run_esmm_unrolled_no_check(int rows, int cols, int inners, float *d_A, floa
   return true;
 }
 
-
-
-
-bool run_esmm_preprocessed_no_check(int rows, int cols, int inners, float *d_A,
-                                   float *d_B, float *d_C, int runs) {
-  // Must match PreprocessParams exactly!
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 8;  // MUST match preprocessing!
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Run preprocessing
-  PreprocessResult result = run_a_preprocess(d_A, rows, cols, inners);
-
-  // Run ESMM with preprocessing
-  for (int i = 0; i < runs; i++) {
-    esmm_preprocessed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
-  }
-  cudaDeviceSynchronize();
-
-  free_preprocess_result(result);
-  return true;
-}
-
-// Row-level preprocessing - config agnostic
-struct PreprocessResultRowLevel {
-  uint8_t* d_list;
-  uint8_t* h_list;
-  int totalSize;
-};
-
-void free_preprocess_result_rowlevel(PreprocessResultRowLevel& result) {
-    if (result.d_list) cudaFree(result.d_list);
-    if (result.h_list) free(result.h_list);
-    result.d_list = nullptr;
-    result.h_list = nullptr;
-}
-
-PreprocessResultRowLevel run_a_preprocess_rowlevel(float *d_A, int M, int K, int BK) {
-    constexpr int NUM_THREADS = 256;
-    constexpr int WARP_SIZE = 32;
-
-    dim3 blockDim(NUM_THREADS);
-
-    const int numKBlocks = K / BK;
-    const int totalSize = M * numKBlocks;
-    const int ROWS_PER_WARP = WARP_SIZE / BK;
-    const int ROWS_PER_BLOCK = ROWS_PER_WARP * (NUM_THREADS / WARP_SIZE);
-    dim3 gridDim(CEIL_DIV(M, ROWS_PER_BLOCK));
-
-
-    PreprocessResultRowLevel result;
-    result.totalSize = totalSize;
-    result.h_list = nullptr;
-    cudaMalloc(&result.d_list, totalSize * sizeof(uint8_t));
-    cudaMemset(result.d_list, 0, totalSize * sizeof(uint8_t));
-
-    if (BK == 8) {
-        preprocess_A_rowlevel<8, NUM_THREADS>
-            <<<gridDim, blockDim>>>(M, M, K, d_A, result.d_list);
-    } else if (BK == 16) {
-        preprocess_A_rowlevel<16, NUM_THREADS>
-            <<<gridDim, blockDim>>>(M, M, K, d_A, result.d_list);
-    } else {
-        printf("ERROR: BK=%d not supported for row-level preprocessing\n", BK);
-    }
-
-    cudaDeviceSynchronize();
-    return result;
-}
-
-bool run_esmm_preprocessed_rowlevel(int rows, int cols, int inners, float *d_A, float *d_B,
-                                    float *d_C, float *h_C, float *h_C_ref, int runs) {
-  // Optimized config with larger tiles (now that shared mem is freed up!)
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Run row-level preprocessing
-  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
-
-  // Run ESMM with row-level preprocessing
-  for (int i = 0; i < runs; i++) {
-    esmm_preprocessed_rowlevel<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
-  }
-  cudaDeviceSynchronize();
-
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    printf("CUDA error: %s\n", cudaGetErrorString(error));
-    free_preprocess_result_rowlevel(result);
-    return false;
-  }
-
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
-
-  free_preprocess_result_rowlevel(result);
-  return passed;
-}
-
-bool run_esmm_preprocessed_rowlevel_no_check(int rows, int cols, int inners, float *d_A,
-                                             float *d_B, float *d_C, int runs) {
-  // Optimized config with larger tiles (now that shared mem is freed up!)
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Run row-level preprocessing
-  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
-
-  // Run ESMM with row-level preprocessing
-  for (int i = 0; i < runs; i++) {
-    esmm_preprocessed_rowlevel<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
-  }
-  cudaDeviceSynchronize();
-
-  free_preprocess_result_rowlevel(result);
-  return true;
-}
-
 // Pattern-specialized kernel with zero-overhead sparsity
 bool run_esmm_pattern_specialized(int rows, int cols, int inners, float *d_A, float *d_B,
                                    float *d_C, float *h_C, float *h_C_ref, int runs) {
@@ -966,30 +710,37 @@ bool run_esmm_pattern_specialized(int rows, int cols, int inners, float *d_A, fl
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   // Run row-level preprocessing
-  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
+  RowLevelMetadata meta = analyze_sparsity_pattern_rowlevel_gpu(d_A, rows, inners, BK);
 
-  // Run ESMM with pattern-specialized computation
+  auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
     esmm_pattern_specialized<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, meta.d_list);
   }
   cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
 
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) {
-    printf("CUDA error: %s\n", cudaGetErrorString(error));
-    free_preprocess_result_rowlevel(result);
+    printf("CUDA Error: %s\\n", cudaGetErrorString(error));
+    free_rowlevel_metadata(meta);
     return false;
   }
 
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
 
-  free_preprocess_result_rowlevel(result);
-  return passed;
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool result = verifyResults(h_C, h_C_ref, rows * cols, 1e-3);
+
+  printf("  Avg Time: %.3f ms | %.1f GFLOPS\\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_rowlevel_metadata(meta);
+  return result;
 }
 
 bool run_esmm_pattern_specialized_no_check(int rows, int cols, int inners, float *d_A,
@@ -1006,139 +757,36 @@ bool run_esmm_pattern_specialized_no_check(int rows, int cols, int inners, float
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   // Run row-level preprocessing
-  PreprocessResultRowLevel result = run_a_preprocess_rowlevel(d_A, rows, inners, BK);
+  RowLevelMetadata meta = analyze_sparsity_pattern_rowlevel_gpu(d_A, rows, inners, BK);
 
-  // Run ESMM with pattern-specialized computation
+  auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
     esmm_pattern_specialized<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, meta.d_list);
   }
   cudaDeviceSynchronize();
-
-  free_preprocess_result_rowlevel(result);
-  return true;
-}
-
-// Count+Offset preprocessing result structure
-struct PreprocessResultCountOffset {
-  CountOffset* d_list;
-  CountOffset* h_list;
-  int totalSize;
-};
-
-void free_preprocess_result_countoffset(PreprocessResultCountOffset& result) {
-    if (result.d_list) cudaFree(result.d_list);
-    if (result.h_list) free(result.h_list);
-    result.d_list = nullptr;
-    result.h_list = nullptr;
-}
-
-PreprocessResultCountOffset run_a_preprocess_countoffset(float *d_A, int M, int K, int BK) {
-    constexpr int NUM_THREADS = 256;
-    constexpr int WARP_SIZE = 32;
-
-    dim3 blockDim(NUM_THREADS);
-
-    const int numKBlocks = K / BK;
-    const int totalSize = M * numKBlocks;
-    const int ROWS_PER_WARP = WARP_SIZE / BK;
-    const int ROWS_PER_BLOCK = ROWS_PER_WARP * (NUM_THREADS / WARP_SIZE);
-    dim3 gridDim(CEIL_DIV(M, ROWS_PER_BLOCK));
-
-    PreprocessResultCountOffset result;
-    result.totalSize = totalSize;
-    result.h_list = nullptr;
-    cudaMalloc(&result.d_list, totalSize * sizeof(CountOffset));
-    cudaMemset(result.d_list, 0, totalSize * sizeof(CountOffset));
-
-    if (BK == 8) {
-        preprocess_A_countoffset<8, NUM_THREADS>
-            <<<gridDim, blockDim>>>(M, M, K, d_A, result.d_list);
-    } else if (BK == 16) {
-        preprocess_A_countoffset<16, NUM_THREADS>
-            <<<gridDim, blockDim>>>(M, M, K, d_A, result.d_list);
-    } else {
-        printf("ERROR: BK=%d not supported for count+offset preprocessing\n", BK);
-    }
-
-    cudaDeviceSynchronize();
-    return result;
-}
-
-bool run_esmm_countoffset(int rows, int cols, int inners, float *d_A, float *d_B,
-                           float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Run count+offset preprocessing
-  PreprocessResultCountOffset result = run_a_preprocess_countoffset(d_A, rows, inners, BK);
-
-  // Run ESMM with count+offset metadata
-  for (int i = 0; i < runs; i++) {
-    esmm_countoffset<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
-  }
-  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
 
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) {
-    printf("CUDA error: %s\n", cudaGetErrorString(error));
-    free_preprocess_result_countoffset(result);
+    printf("CUDA Error: %s\\n", cudaGetErrorString(error));
+    free_rowlevel_metadata(meta);
     return false;
   }
 
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
 
-  free_preprocess_result_countoffset(result);
-  return passed;
-}
+  printf("  Avg Time: %.3f ms | %.1f GFLOPS\\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
 
-bool run_esmm_countoffset_no_check(int rows, int cols, int inners, float *d_A,
-                                    float *d_B, float *d_C, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Run count+offset preprocessing
-  PreprocessResultCountOffset result = run_a_preprocess_countoffset(d_A, rows, inners, BK);
-
-  // Run ESMM with count+offset metadata
-  for (int i = 0; i < runs; i++) {
-    esmm_countoffset<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, result.d_list);
-  }
-  cudaDeviceSynchronize();
-
-  free_preprocess_result_countoffset(result);
+  free_rowlevel_metadata(meta);
   return true;
 }
 
-// ============================================================================
 // HYBRID APPROACH (Kernel 20) - Best of K13 + K18
 // ============================================================================
 
@@ -1158,76 +806,14 @@ bool run_esmm_hybrid(int rows, int cols, int inners, float *d_A, float *d_B,
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
-  // Download A matrix to analyze pattern
-  float* h_A = (float*)malloc(rows * inners * sizeof(float));
-  cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
+  // GPU-based preprocessing - no host transfer needed!
+  BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
 
-  // Analyze sparsity pattern
-  HybridMetadata meta = analyze_sparsity_pattern(h_A, rows, inners, BK);
-  free(h_A);
-
-  if (meta.isUniform) {
-    // MODE 1: Use global offset list with template SIZE
-    printf("Using UNIFORM mode (SIZE=%d, metadata=16 bytes)\n", meta.patternCount);
-
-    // Copy offsets to device (constant memory would be even better!)
-    uint8_t* d_offsets;
-    cudaMalloc(&d_offsets, 8 * sizeof(uint8_t));
-    cudaMemcpy(d_offsets, meta.offsets, 8 * sizeof(uint8_t), cudaMemcpyHostToDevice);
-
-    // Template dispatch based on pattern count
-    for (int i = 0; i < runs; i++) {
-      switch (meta.patternCount) {
-        case 1:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 2:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 3:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 4:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 5:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 6:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 7:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 8:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        default:
-          printf("Error: Unsupported pattern count %d\n", meta.patternCount);
-          cudaFree(d_offsets);
-          free_hybrid_metadata(meta);
-          return false;
-      }
-    }
-
-    cudaFree(d_offsets);
-  } else {
-    // MODE 2: Use per-row bitmasks
-    printf("Using NON-UNIFORM mode (metadata=%.1f MB)\n",
-           (meta.totalRows * meta.numKBlocks) / (1024.0f * 1024.0f));
-
-    for (int i = 0; i < runs; i++) {
-      esmm_hybrid_nonuniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, meta.d_rowMasks);
-    }
+  // Run kernel with block-wise patterns
+  for (int i = 0; i < runs; i++) {
+    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
   }
 
   cudaDeviceSynchronize();
@@ -1235,14 +821,14 @@ bool run_esmm_hybrid(int rows, int cols, int inners, float *d_A, float *d_B,
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) {
     printf("CUDA error: %s\n", cudaGetErrorString(error));
-    free_hybrid_metadata(meta);
+    free_block_pattern_metadata(meta);
     return false;
   }
 
   cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
   bool passed = verifyResults(h_C, h_C_ref, rows * cols);
 
-  free_hybrid_metadata(meta);
+  free_block_pattern_metadata(meta);
   return passed;
 }
 
@@ -1262,69 +848,19 @@ bool run_esmm_hybrid_no_check(int rows, int cols, int inners, float *d_A,
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
-  // Download A matrix to analyze pattern
-  float* h_A = (float*)malloc(rows * inners * sizeof(float));
-  cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
+  // GPU-based preprocessing - no host transfer needed!
+  BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
 
-  // Analyze sparsity pattern
-  HybridMetadata meta = analyze_sparsity_pattern(h_A, rows, inners, BK);
-  free(h_A);
-
-  if (meta.isUniform) {
-    // MODE 1: Use global offset list
-    uint8_t* d_offsets;
-    cudaMalloc(&d_offsets, 8 * sizeof(uint8_t));
-    cudaMemcpy(d_offsets, meta.offsets, 8 * sizeof(uint8_t), cudaMemcpyHostToDevice);
-
-    for (int i = 0; i < runs; i++) {
-      switch (meta.patternCount) {
-        case 1:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 2:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 3:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 4:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 5:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 6:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 7:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-        case 8:
-          esmm_hybrid_uniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
-              <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_offsets);
-          break;
-      }
-    }
-
-    cudaFree(d_offsets);
-  } else {
-    // MODE 2: Use per-row bitmasks
-    for (int i = 0; i < runs; i++) {
-      esmm_hybrid_nonuniform<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, meta.d_rowMasks);
-    }
+  // Run kernel with block-wise patterns
+  for (int i = 0; i < runs; i++) {
+    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
   }
 
   cudaDeviceSynchronize();
 
-  free_hybrid_metadata(meta);
+  free_block_pattern_metadata(meta);
   return true;
 }
 

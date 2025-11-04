@@ -14,8 +14,8 @@ using std::cout;
 using std::endl;
 
 
-// Forward decl
-bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check);
+// Forward decl - removed with old preprocessors
+// bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check);
 struct PreprocessResult {
   int* d_list;
   int* h_list;
@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 20; i++) {
+    for (int i = 1; i <= 17; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 20; i++) {
+    for (int i = start; i <= end && i <= 17; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 20) {
+    if (kernel >= 1 && kernel <= 17) {
       kernels.push_back(kernel);
     }
   }
@@ -68,11 +68,8 @@ const char* get_kernel_name(int kernel_choice) {
     case 13: return "ESMM Offsets";
     case 14: return "ESMM Unrolled";
     case 15: return "cuBLAS";
-    case 16: return "ESMM Preprocessed (Bitmask)";
-    case 17: return "ESMM Preprocessed (Row-Level, Config-Agnostic)";
-    case 18: return "ESMM Pattern-Specialized (Zero Overhead)";
-    case 19: return "ESMM Count+Offset (Unrolled Dispatch)";
-    case 20: return "ESMM Hybrid (Adaptive: Offset List or Bitmask)";
+    case 16: return "ESMM Pattern-Specialized (Zero Overhead)";
+    case 17: return "ESMM Block-wise Uniform (Per-Warp Pattern Encoding)";
     default: return "Unknown Kernel";
   }
 }
@@ -332,6 +329,8 @@ bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
   return allMatch;
 }
 
+// Removed - old preprocessor verification (K16/K17/K19 deleted)
+/*
 bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_view sparsity) {
   std::string arg = argv[1];
   bool success = false;
@@ -361,6 +360,7 @@ bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_
 
   exit(success ? 0 : 1);
 }
+*/
 
 
 //TODO: Replace these with unrolled loops file

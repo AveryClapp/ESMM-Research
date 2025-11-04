@@ -44,12 +44,14 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
+	const uint numKBlocks = K / BK;  // Runtime value
+
 	__shared__ float As[BN * BK];
 	__shared__ float Bs[BM * BK];
 
-	// Cache masks for rows in this block
-	constexpr uint numKBlocks = 1024 / BK;  // Hardcoded for now
-	__shared__ uint8_t rowMasks[BM * numKBlocks];
+	// Dynamically sized mask cache based on actual K
+	// Uses uint16_t to handle both BK=8 (needs 8 bits) and BK=16 (needs 16 bits)
+	extern __shared__ uint16_t rowMasks[];
 
 	A += cRow * BM * K;
 	B += cCol * BN;
@@ -66,21 +68,21 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	float regM[WMITER * TM] = {0.0};
 	float regN[WNITER * TN] = {0.0};
 
-	// Load masks for all rows in this block
+	// Load masks for all rows in this block (as uint16_t)
 	const uint globalRowBase = cRow * BM;
 	for (uint i = threadIdx.x; i < BM * numKBlocks; i += blockDim.x) {
 		const uint localRow = i / numKBlocks;
 		const uint kBlock = i % numKBlocks;
 		const uint globalRow = globalRowBase + localRow;
-		rowMasks[i] = A_LIST[globalRow * numKBlocks + kBlock];
+		rowMasks[i] = reinterpret_cast<const uint16_t*>(A_LIST)[globalRow * numKBlocks + kBlock];
 	}
 	__syncthreads();
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
 		const uint kBlock = bkIdx / BK;
 
-		// Aggregate mask for this warp's rows
-		uint8_t warpMask = 0;
+		// Aggregate mask for this warp's rows (uint16_t for BK=16 support)
+		uint16_t warpMask = 0;
 		for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 			const uint localRow = warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM;
 			if (localRow < BM) {

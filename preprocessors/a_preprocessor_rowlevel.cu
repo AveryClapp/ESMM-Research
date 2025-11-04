@@ -6,33 +6,57 @@
 #include <cuda_runtime.h>
 
 /*
- * Stores one bitmask per row per K-block
- * Layout: row * numKBlocks + kBlock
- * Any kernel config can read this!
- *
- * @param BK The K-block size (typically 8 or 16)
+ * @param BK The K-block size (8 or 16)
+ * @param NUM_THREADS Number of threads launched with the kernel
  */
 template <const int BK, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
 	preprocess_A_rowlevel(int M, int N, int K, float *A, uint8_t* A_LIST) {
 
-	const uint row = blockIdx.x * blockDim.x + threadIdx.x;
-	if (row >= M) return;
-
+	constexpr int WARP_SIZE = 32;
 	const uint numKBlocks = K / BK;
 
-	// Each thread processes one full row
-	for (uint kBlock = 0; kBlock < numKBlocks; kBlock++) {
-		uint8_t mask = 0;
+	const uint warpId = threadIdx.x / WARP_SIZE;
+	const uint laneId = threadIdx.x % WARP_SIZE;
 
-		// Check all BK columns in this K-block
-		for (int dotIdx = 0; dotIdx < BK; dotIdx++) {
-			if (A[row * K + kBlock * BK + dotIdx] != 0.0f) {
-				mask |= (1 << dotIdx);
+	constexpr int ROWS_PER_WARP = WARP_SIZE / BK;
+	constexpr int THREADS_PER_ROW = BK;
+
+	constexpr int ROWS_PER_BLOCK = ROWS_PER_WARP * (NUM_THREADS / WARP_SIZE);
+
+	for (uint rowBlockBase = blockIdx.x * ROWS_PER_BLOCK;
+	     rowBlockBase < M;
+	     rowBlockBase += gridDim.x * ROWS_PER_BLOCK) {
+
+		const uint localRowInWarp = laneId / THREADS_PER_ROW;
+		const uint threadPosInRow = laneId % THREADS_PER_ROW;
+
+		const uint row = rowBlockBase + warpId * ROWS_PER_WARP + localRowInWarp;
+
+		if (row >= M) return;
+
+		#pragma unroll 4
+		for (uint kBlock = 0; kBlock < numKBlocks; kBlock++) {
+
+			// Use __ldg for read-only cache optimization
+			const uint kOffset = kBlock * BK + threadPosInRow;
+			const float val = __ldg(&A[row * K + kOffset]);
+
+			const uint32_t ballot = __ballot_sync(0xffffffff, val != 0.0f);
+
+			uint16_t mask;
+			if constexpr (BK == 8) {
+				const uint shift = localRowInWarp * 8;
+				mask = (ballot >> shift) & 0xFF;
+			} else if constexpr (BK == 16) {
+				const uint shift = localRowInWarp * 16;
+				mask = (ballot >> shift) & 0xFFFF;
+			}
+
+			if (threadPosInRow == 0) {
+				// Store as uint16_t to handle both BK=8 and BK=16
+				reinterpret_cast<uint16_t*>(A_LIST)[row * numKBlocks + kBlock] = mask;
 			}
 		}
-
-		// Store mask: simple row-major layout
-		A_LIST[row * numKBlocks + kBlock] = mask;
 	}
 }

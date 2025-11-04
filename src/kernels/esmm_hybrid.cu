@@ -27,6 +27,7 @@
 
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"
+#include "../../include/pattern_lut.cuh"
 #include "../preprocessors/a_preprocessor_hybrid.cu"
 #include <cuda_runtime.h>
 
@@ -146,15 +147,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
         const uint blockId = globalWarpRow * numKBlocks + kBlock;
         const uint8_t pattern = blockPatterns[blockId];
 
-        // *** Reconstruct offsets from pattern ***
-        uint8_t offsets[8];
-        uint8_t count = 0;
-        #pragma unroll
-        for (int i = 0; i < BK; i++) {
-            if (pattern & (1 << i)) {
-                offsets[count++] = i;
-            }
-        }
+        // *** LUT-based offset lookup (eliminates runtime loop) ***
+        const uint8_t count = PATTERN_LUT_BK8[pattern].count;
+        const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
 
         // Early exit if all zeros
         if (count == 0) {

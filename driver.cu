@@ -153,10 +153,10 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 int main(int argc, char *argv[]) {
 
     // Define Matrix Dims
-    constexpr int rows = 2048;
-    constexpr int cols = 2048;
-    constexpr int inners = 2048;
-    constexpr std::string_view sparsity = "10000000";
+    constexpr int rows = 1024;
+    constexpr int cols = 1024;
+    constexpr int inners = 1024;
+    constexpr std::string_view sparsity = "11111111";
 
     // Default values
     std::vector<int> kernel_choices = {13};

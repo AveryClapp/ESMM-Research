@@ -20,9 +20,6 @@
  *   - Divergence: Zero (warp-uniform pattern)
  *   - Overhead: Minimal (single byte load + bit manipulation)
  *
- * Best for:
- *   Random sparsity with block-level uniformity (e.g., structured pruning,
- *   activation sparsity in transformer models)
  */
 
 #include "../../include/utils.cuh"
@@ -137,28 +134,23 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-    // Calculate global warp row for pattern lookup
     const uint globalWarpRow = cRow * (BM / WM) + warpRow;
 
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
-        // *** Load pattern for this warp tile's 8×32 block ***
         const uint blockId = globalWarpRow * numKBlocks + kBlock;
         const uint8_t pattern = blockPatterns[blockId];
 
-        // *** LUT-based offset lookup (eliminates runtime loop) ***
         const uint8_t count = PATTERN_LUT_BK8[pattern].count;
         const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
 
-        // Early exit if all zeros
         if (count == 0) {
             A += BK;
             B += BK * N;
             continue;
         }
 
-        // Load A tile
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
                 &A[(innerRowA + offset) * K + innerColA * 4])[0];
@@ -167,7 +159,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
             As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
             As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
         }
-
         // Load B tile
         for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
             reinterpret_cast<float4 *>(
@@ -226,7 +217,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
         __syncthreads();
     }
 
-    // Write results back to global memory
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;

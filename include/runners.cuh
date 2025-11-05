@@ -853,14 +853,21 @@ bool run_esmm_hybrid_no_check(int rows, int cols, int inners, float *d_A,
   // GPU-based preprocessing - no host transfer needed!
   BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
 
-  // Run kernel with block-wise patterns
+  // Time kernel execution separately
+  auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
     esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 meta.d_blockPatterns, meta.numKBlocks);
   }
-
   cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 17 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
 
   free_block_pattern_metadata(meta);
   return true;
@@ -940,15 +947,22 @@ bool run_esmm_combined_no_check(int rows, int cols, int inners, float *d_A,
   // Preprocess B matrix for column-level sparsity
   BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
 
-  // Run combined kernel
+  // Time kernel execution separately
+  auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
     esmm_combined_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 A_meta.d_blockPatterns, B_meta.d_blockPatterns,
                                 A_meta.numKBlocks, B_meta.numNBlocks);
   }
-
   cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 18 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
 
   free_block_pattern_metadata(A_meta);
   free_b_pattern_metadata(B_meta);

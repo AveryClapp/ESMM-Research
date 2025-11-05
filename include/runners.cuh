@@ -28,6 +28,7 @@
 #include "preprocess_params.cuh"
 #include <chrono>
 #include <cublas_v2.h>
+#include <cusparse.h>
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <string_view>
@@ -952,6 +953,198 @@ bool run_esmm_combined_no_check(int rows, int cols, int inners, float *d_A,
   free_block_pattern_metadata(A_meta);
   free_b_pattern_metadata(B_meta);
   return true;
+}
+
+// ============================================================================
+// cuSPARSE FUNCTIONS (Kernel 19)
+// ============================================================================
+
+void run_cuSparse(int rows, int cols, int inners, float *d_A, float *d_B,
+                  float *d_C, float *h_C, int runs) {
+  cusparseHandle_t handle;
+  cusparseCreate(&handle);
+
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+
+  // Create matrix descriptors
+  cusparseSpMatDescr_t matA;
+  cusparseDnMatDescr_t matB, matC;
+
+  // Create dense matrix descriptors for B and C
+  cusparseCreateDnMat(&matB, inners, cols, cols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW);
+  cusparseCreateDnMat(&matC, rows, cols, cols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW);
+
+  // Count non-zeros in A
+  int nnz = 0;
+  float* h_A = (float*)malloc(rows * inners * sizeof(float));
+  cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
+  for (int i = 0; i < rows * inners; i++) {
+    if (h_A[i] != 0.0f) nnz++;
+  }
+
+  // Convert A to CSR format
+  int* h_csrRowPtr = (int*)malloc((rows + 1) * sizeof(int));
+  int* h_csrColInd = (int*)malloc(nnz * sizeof(int));
+  float* h_csrVal = (float*)malloc(nnz * sizeof(float));
+
+  int idx = 0;
+  h_csrRowPtr[0] = 0;
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < inners; j++) {
+      float val = h_A[i * inners + j];
+      if (val != 0.0f) {
+        h_csrVal[idx] = val;
+        h_csrColInd[idx] = j;
+        idx++;
+      }
+    }
+    h_csrRowPtr[i + 1] = idx;
+  }
+
+  // Copy CSR data to device
+  int *d_csrRowPtr, *d_csrColInd;
+  float *d_csrVal;
+  cudaMalloc(&d_csrRowPtr, (rows + 1) * sizeof(int));
+  cudaMalloc(&d_csrColInd, nnz * sizeof(int));
+  cudaMalloc(&d_csrVal, nnz * sizeof(float));
+  cudaMemcpy(d_csrRowPtr, h_csrRowPtr, (rows + 1) * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_csrColInd, h_csrColInd, nnz * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_csrVal, h_csrVal, nnz * sizeof(float), cudaMemcpyHostToDevice);
+
+  // Create sparse matrix A in CSR format
+  cusparseCreateCsr(&matA, rows, inners, nnz,
+                    d_csrRowPtr, d_csrColInd, d_csrVal,
+                    CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                    CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
+
+  // Allocate buffer for SpMM
+  size_t bufferSize = 0;
+  cusparseSpMM_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                          CUSPARSE_OPERATION_NON_TRANSPOSE,
+                          &alpha, matA, matB, &beta, matC,
+                          CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize);
+
+  void* dBuffer = nullptr;
+  cudaMalloc(&dBuffer, bufferSize);
+
+  // Run SpMM
+  for (int i = 0; i < runs; i++) {
+    cusparseSpMM(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                 &alpha, matA, matB, &beta, matC,
+                 CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, dBuffer);
+  }
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+
+  // Cleanup
+  cusparseDestroySpMat(matA);
+  cusparseDestroyDnMat(matB);
+  cusparseDestroyDnMat(matC);
+  cusparseDestroy(handle);
+  cudaFree(d_csrRowPtr);
+  cudaFree(d_csrColInd);
+  cudaFree(d_csrVal);
+  cudaFree(dBuffer);
+  free(h_A);
+  free(h_csrRowPtr);
+  free(h_csrColInd);
+  free(h_csrVal);
+}
+
+void run_cuSparse_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
+                           float *d_C, int runs) {
+  cusparseHandle_t handle;
+  cusparseCreate(&handle);
+
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+
+  // Create matrix descriptors
+  cusparseSpMatDescr_t matA;
+  cusparseDnMatDescr_t matB, matC;
+
+  // Create dense matrix descriptors for B and C
+  cusparseCreateDnMat(&matB, inners, cols, cols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW);
+  cusparseCreateDnMat(&matC, rows, cols, cols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW);
+
+  // Count non-zeros in A
+  int nnz = 0;
+  float* h_A = (float*)malloc(rows * inners * sizeof(float));
+  cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
+  for (int i = 0; i < rows * inners; i++) {
+    if (h_A[i] != 0.0f) nnz++;
+  }
+
+  // Convert A to CSR format
+  int* h_csrRowPtr = (int*)malloc((rows + 1) * sizeof(int));
+  int* h_csrColInd = (int*)malloc(nnz * sizeof(int));
+  float* h_csrVal = (float*)malloc(nnz * sizeof(float));
+
+  int idx = 0;
+  h_csrRowPtr[0] = 0;
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < inners; j++) {
+      float val = h_A[i * inners + j];
+      if (val != 0.0f) {
+        h_csrVal[idx] = val;
+        h_csrColInd[idx] = j;
+        idx++;
+      }
+    }
+    h_csrRowPtr[i + 1] = idx;
+  }
+
+  // Copy CSR data to device
+  int *d_csrRowPtr, *d_csrColInd;
+  float *d_csrVal;
+  cudaMalloc(&d_csrRowPtr, (rows + 1) * sizeof(int));
+  cudaMalloc(&d_csrColInd, nnz * sizeof(int));
+  cudaMalloc(&d_csrVal, nnz * sizeof(float));
+  cudaMemcpy(d_csrRowPtr, h_csrRowPtr, (rows + 1) * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_csrColInd, h_csrColInd, nnz * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_csrVal, h_csrVal, nnz * sizeof(float), cudaMemcpyHostToDevice);
+
+  // Create sparse matrix A in CSR format
+  cusparseCreateCsr(&matA, rows, inners, nnz,
+                    d_csrRowPtr, d_csrColInd, d_csrVal,
+                    CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                    CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
+
+  // Allocate buffer for SpMM
+  size_t bufferSize = 0;
+  cusparseSpMM_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                          CUSPARSE_OPERATION_NON_TRANSPOSE,
+                          &alpha, matA, matB, &beta, matC,
+                          CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize);
+
+  void* dBuffer = nullptr;
+  cudaMalloc(&dBuffer, bufferSize);
+
+  // Run SpMM
+  for (int i = 0; i < runs; i++) {
+    cusparseSpMM(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                 &alpha, matA, matB, &beta, matC,
+                 CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, dBuffer);
+  }
+  cudaDeviceSynchronize();
+
+  // Cleanup
+  cusparseDestroySpMat(matA);
+  cusparseDestroyDnMat(matB);
+  cusparseDestroyDnMat(matC);
+  cusparseDestroy(handle);
+  cudaFree(d_csrRowPtr);
+  cudaFree(d_csrColInd);
+  cudaFree(d_csrVal);
+  cudaFree(dBuffer);
+  free(h_A);
+  free(h_csrRowPtr);
+  free(h_csrColInd);
+  free(h_csrVal);
 }
 
 

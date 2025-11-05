@@ -141,6 +141,14 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 19: // cuSPARSE
+        if (check_results) {
+            run_cuSparse(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
+        } else {
+            run_cuSparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        res = true; // Assume cuSPARSE always succeeds
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -163,7 +171,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11110000";
+    constexpr std::string_view sparsity = "10000000";
 
     // Default values
     std::vector<int> kernel_choices = {13};

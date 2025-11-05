@@ -23,6 +23,8 @@
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_1.cu"
 #include "../src/kernels/esmm_hybrid.cu"
 #include "../src/kernels/esmm_hybrid_combined.cu"
+#include "../src/kernels/esmm_hybrid_combined_opt.cu"
+#include "../src/kernels/esmm_hybrid_combined_v2.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "preprocess_params.cuh"
@@ -961,6 +963,94 @@ bool run_esmm_combined_no_check(int rows, int cols, int inners, float *d_A,
   std::chrono::duration<double, std::milli> elapsed = end - start;
   double avg_time = elapsed.count() / runs;
   printf("  Kernel 18 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_block_pattern_metadata(A_meta);
+  free_b_pattern_metadata(B_meta);
+  return true;
+}
+
+bool run_esmm_combined_opt_no_check(int rows, int cols, int inners, float *d_A,
+                                     float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess A matrix for row-level sparsity
+  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  // Preprocess B matrix for column-level sparsity
+  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
+
+  // Time kernel execution separately
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_combined_blockwise_opt<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                A_meta.d_blockPatterns, B_meta.d_blockPatterns,
+                                A_meta.numKBlocks, B_meta.numNBlocks);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 18-OPT Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_block_pattern_metadata(A_meta);
+  free_b_pattern_metadata(B_meta);
+  return true;
+}
+
+bool run_esmm_combined_v2_no_check(int rows, int cols, int inners, float *d_A,
+                                    float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess A matrix for row-level sparsity
+  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  // Preprocess B matrix for column-level sparsity
+  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
+
+  // Time kernel execution separately
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_combined_blockwise_v2<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                A_meta.d_blockPatterns, B_meta.d_blockPatterns,
+                                A_meta.numKBlocks, B_meta.numNBlocks);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 21 Avg Time: %.3f ms | %.1f GFLOPS\n",
          avg_time,
          (2.0 * rows * cols * inners) / (avg_time * 1e6));
 

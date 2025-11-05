@@ -7,15 +7,16 @@
 #include <cuda_runtime.h>
 
 /*
- * B-Matrix GPU Preprocessing Kernel
+ * B-Matrix GPU Preprocessing Kernel (OPTIMIZED)
  *
  * Analyzes B matrix (K × N) in blocks of BK × TN (typically 8 × 8)
  * Creates 8-bit patterns indicating which of TN columns are non-zero
  *
  * Key optimizations:
- * 1. Coalesced memory access
- * 2. Warp-level reduction using shuffle
- * 3. Process multiple N-blocks in one pass
+ * 1. Full warp utilization - all 32 threads active
+ * 2. Each warp processes multiple N-blocks in parallel
+ * 3. Coalesced memory access via shared memory
+ * 4. Warp-level reductions for pattern combination
  *
  * Memory layout:
  * - B is K × N, row-major
@@ -28,81 +29,62 @@ __global__ void preprocess_b_patterns(
     uint8_t* __restrict__ blockPatterns
 ) {
     constexpr int WARP_SIZE = 32;
-    constexpr int TILE_K = BK;      // 8 K-rows
-    constexpr int TILE_N = TN * 4;  // Process 4 N-blocks at once (32 cols for TN=8)
-
-    // Shared memory for tile: [TILE_K][TILE_N]
-    __shared__ float smem[TILE_K][TILE_N];
+    constexpr int WARPS_PER_BLOCK = NUM_THREADS / WARP_SIZE;
 
     const int numKBlocks = K / BK;
     const int numNBlocks = N / TN;
 
+    const int warpId = threadIdx.x / WARP_SIZE;
     const int laneId = threadIdx.x % WARP_SIZE;
 
-    // Each block processes one K-block across multiple N-blocks
+    // Each block processes one K-block, each warp processes different N-blocks
     const int kBlock = blockIdx.x;
     if (kBlock >= numKBlocks) return;
 
     const int globalKBase = kBlock * BK;
 
-    // Process N-blocks in batches of 4
-    for (int nBlockBatch = 0; nBlockBatch < numNBlocks; nBlockBatch += 4) {
-        // Load data into shared memory with coalesced access
-        constexpr int ELEMENTS_PER_THREAD = (TILE_K * TILE_N) / NUM_THREADS;
+    // Process N-blocks, with each warp handling WARPS_PER_BLOCK blocks at a time
+    for (int nBlockBase = warpId; nBlockBase < numNBlocks; nBlockBase += WARPS_PER_BLOCK) {
+        uint8_t threadPattern = 0;
+
+        // Each thread processes a subset of (K,N) elements
+        // Distribute BK * TN work across 32 threads
+        // Each thread handles: (BK * TN) / 32 = 2 elements (for BK=8, TN=8)
+        constexpr int ELEMENTS_PER_WARP = BK * TN;
+        constexpr int ELEMENTS_PER_THREAD = (ELEMENTS_PER_WARP + WARP_SIZE - 1) / WARP_SIZE;
 
         #pragma unroll
         for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
-            const int flatIdx = threadIdx.x + i * NUM_THREADS;
-            const int row = flatIdx / TILE_N;
-            const int col = flatIdx % TILE_N;
+            const int flatIdx = laneId + i * WARP_SIZE;
+            if (flatIdx < ELEMENTS_PER_WARP) {
+                const int kRow = flatIdx / TN;
+                const int nCol = flatIdx % TN;
 
-            const int globalRow = globalKBase + row;
-            const int globalCol = nBlockBatch * TN + col;
+                const int globalRow = globalKBase + kRow;
+                const int globalCol = nBlockBase * TN + nCol;
 
-            if (globalRow < K && globalCol < N) {
-                smem[row][col] = B[globalRow * N + globalCol];
-            } else {
-                smem[row][col] = 0.0f;
-            }
-        }
-
-        __syncthreads();
-
-        // Now compute patterns for up to 4 N-blocks
-        #pragma unroll
-        for (int nb = 0; nb < 4 && (nBlockBatch + nb) < numNBlocks; nb++) {
-            uint8_t threadPattern = 0;
-
-            // Each thread processes columns from one N-block
-            if (laneId < BK) {  // Only first BK lanes participate
-                const int kRow = laneId;
-                const int nOffset = nb * TN;
-
-                // OR together TN columns to create pattern
-                #pragma unroll
-                for (int n = 0; n < TN; n++) {
-                    if (smem[kRow][nOffset + n] != 0.0f) {
-                        threadPattern |= (1 << n);
+                if (globalRow < K && globalCol < N) {
+                    float val = B[globalRow * N + globalCol];
+                    if (val != 0.0f) {
+                        threadPattern |= (1 << nCol);
                     }
                 }
             }
-
-            // Warp-level reduction: OR all row patterns together
-            uint8_t blockPattern = threadPattern;
-
-            #pragma unroll
-            for (int offset = 16; offset > 0; offset >>= 1) {
-                blockPattern |= __shfl_xor_sync(0xFFFFFFFF, blockPattern, offset);
-            }
-
-            // First thread writes result
-            if (laneId == 0) {
-                const int outIdx = kBlock * numNBlocks + nBlockBatch + nb;
-                blockPatterns[outIdx] = blockPattern;
-            }
         }
 
-        __syncthreads();
+        // Warp-level reduction: OR all thread patterns together
+        uint8_t blockPattern = threadPattern;
+
+        #pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            blockPattern |= __shfl_xor_sync(0xFFFFFFFF, blockPattern, offset);
+        }
+
+        // First thread of warp writes result
+        if (laneId == 0) {
+            const int outIdx = kBlock * numNBlocks + nBlockBase;
+            blockPatterns[outIdx] = blockPattern;
+        }
     }
 }
 

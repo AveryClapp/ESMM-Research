@@ -22,10 +22,10 @@
  */
 template <const int BK, const int WM, const int NUM_THREADS>
 __global__ void preprocess_blockwise_patterns(
-    int M, int K,
-    const float* __restrict__ A,
-    uint8_t* __restrict__ blockPatterns
-) {
+        int M, int K,
+        const float* __restrict__ A,
+        uint8_t* __restrict__ blockPatterns
+        ) {
     constexpr int WARP_SIZE = 32;
     constexpr int TILE_M = WM;
     constexpr int TILE_K = BK * 4;
@@ -46,7 +46,7 @@ __global__ void preprocess_blockwise_patterns(
     for (int kBlockBatch = 0; kBlockBatch < numKBlocks; kBlockBatch += 4) {
         constexpr int LOADS_PER_THREAD = (TILE_M * TILE_K) / NUM_THREADS;
 
-        #pragma unroll
+#pragma unroll
         for (int i = 0; i < LOADS_PER_THREAD; i++) {
             const int flatIdx = threadIdx.x + i * NUM_THREADS;
             const int row = flatIdx / TILE_K;
@@ -55,32 +55,27 @@ __global__ void preprocess_blockwise_patterns(
             const int globalRow = globalRowBase + row;
             const int globalCol = kBlockBatch * BK + col;
 
-            if (globalRow < M && globalCol < K) {
-                smem[col][row] = A[globalRow * K + globalCol];
-            } else {
-                smem[col][row] = 0.0f;
-            }
+            smem[col][row] = A[globalRow * K + globalCol];
         }
 
         __syncthreads();
 
-        #pragma unroll
+#pragma unroll
         for (int kb = 0; kb < 4 && (kBlockBatch + kb) < numKBlocks; kb++) {
             uint8_t threadPattern = 0;
 
-            if (laneId < TILE_M) {
-                const int kOffset = kb * BK;
+            const int kOffset = kb * BK;
 
-                #pragma unroll
-                for (int k = 0; k < 8; k++) {
-                    if (smem[kOffset + k][laneId] != 0.0f) {
-                        threadPattern |= (1 << k);
-                    }
+#pragma unroll
+            for (int k = 0; k < 8; k++) {
+                if (smem[kOffset + k][laneId] != 0.0f) {
+                    threadPattern |= (1 << k);
                 }
+            }
 
             uint8_t warpPattern = threadPattern;
 
-            #pragma unroll
+#pragma unroll
             for (int offset = 16; offset > 0; offset >>= 1) {
                 warpPattern |= __shfl_xor_sync(0xFFFFFFFF, warpPattern, offset);
             }
@@ -89,9 +84,9 @@ __global__ void preprocess_blockwise_patterns(
                 const int outIdx = globalWarpRow * numKBlocks + kBlockBatch + kb;
                 blockPatterns[outIdx] = warpPattern;
             }
-        }
 
-        __syncthreads();
+            __syncthreads();
+        }
     }
 }
 
@@ -122,7 +117,7 @@ BlockPatternMetadata analyze_sparsity_pattern_gpu(float* d_A, int M, int K, int 
 
     preprocess_blockwise_patterns<8, 32, NUM_THREADS>
         <<<gridDim, blockDim>>>(M, K, d_A, meta.d_blockPatterns);
-  
+
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 

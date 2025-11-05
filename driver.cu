@@ -149,6 +149,12 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         }
         res = true; // Assume cuSPARSE always succeeds
         break;
+    case 20: // ESMM Combined A+B Sparsity (Optimized - Conditional Loading)
+        res = run_esmm_combined_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        break;
+    case 21: // ESMM Combined A+B Sparsity V2 (Simplified Inline)
+        res = run_esmm_combined_v2_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;

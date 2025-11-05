@@ -1,3 +1,5 @@
+#pragma once
+
 // Minimal B-pattern dispatch (5 common patterns only)
 // For faster compilation during experimentation
 

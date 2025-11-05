@@ -89,3 +89,23 @@ inline void free_countoffset_result(CountOffsetResult& result) {
 // Benefit: Zero runtime overhead, maximum performance
 
 // No metadata structure needed - pattern is compile-time constant
+
+// ============================================================================
+// B-Matrix Block-wise Pattern Encoding (For B-Sparsity)
+// ============================================================================
+// Use case: Each BK×TN block (8×8) has uniform sparsity pattern
+// Memory: 1 byte per block
+// Benefit: Skip computation and output writes for zero column groups
+
+struct BMatrixPatternMetadata {
+    uint8_t* d_blockPatterns;  // Pattern for each BK×TN block
+    int numKBlocks;            // Number of K-blocks (K / BK)
+    int numNBlocks;            // Number of N-blocks (N / TN)
+};
+
+inline void free_b_pattern_metadata(BMatrixPatternMetadata& meta) {
+    if (meta.d_blockPatterns) {
+        cudaFree(meta.d_blockPatterns);
+        meta.d_blockPatterns = nullptr;
+    }
+}

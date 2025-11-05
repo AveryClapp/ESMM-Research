@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 17; i++) {
+    for (int i = 1; i <= 18; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 17; i++) {
+    for (int i = start; i <= end && i <= 18; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 17) {
+    if (kernel >= 1 && kernel <= 18) {
       kernels.push_back(kernel);
     }
   }
@@ -70,6 +70,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 15: return "cuBLAS";
     case 16: return "ESMM Pattern-Specialized (Zero Overhead)";
     case 17: return "ESMM Block-wise Uniform (Per-Warp Pattern Encoding)";
+    case 18: return "ESMM Combined A+B Sparsity";
     default: return "Unknown Kernel";
   }
 }

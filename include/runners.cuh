@@ -23,8 +23,6 @@
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_1.cu"
 #include "../src/kernels/esmm_hybrid.cu"
 #include "../src/kernels/esmm_hybrid_combined.cu"
-#include "../src/kernels/esmm_hybrid_combined_opt.cu"
-#include "../src/kernels/esmm_hybrid_combined_v2.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "preprocess_params.cuh"
@@ -602,7 +600,7 @@ void run_cuBlas_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
 }
 
 bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
-                          float *d_B, float *d_C, int runs, 
+                          float *d_B, float *d_C, int runs,
                           std::string_view pattern) {
   const uint NUM_THREADS = 256;
   const uint BN = 128;
@@ -625,35 +623,46 @@ bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
 
   cudaMalloc(&sparse_data, SIZE * sizeof(int));
   cudaMemcpy(sparse_data, sparsity_list.data(), SIZE * sizeof(int), cudaMemcpyHostToDevice);
-  if (SIZE == 1) {
-    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 2) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
+
+  // Time kernel execution
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    if (SIZE == 1) {
+      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 3) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 4) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 5) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 6) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 7) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 8) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 2) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 3) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 4) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 5) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 6) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 7) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    } else if (SIZE == 8) {
+        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
+            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
+    }
   }
-
-
   cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
 
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 13 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  cudaFree(sparse_data);
   return true;
 }
 
@@ -970,285 +979,3 @@ bool run_esmm_combined_no_check(int rows, int cols, int inners, float *d_A,
   free_b_pattern_metadata(B_meta);
   return true;
 }
-
-bool run_esmm_combined_opt_no_check(int rows, int cols, int inners, float *d_A,
-                                     float *d_B, float *d_C, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Preprocess A matrix for row-level sparsity
-  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
-
-  // Preprocess B matrix for column-level sparsity
-  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
-
-  // Time kernel execution separately
-  auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < runs; i++) {
-    esmm_combined_blockwise_opt<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
-                                A_meta.d_blockPatterns, B_meta.d_blockPatterns,
-                                A_meta.numKBlocks, B_meta.numNBlocks);
-  }
-  cudaDeviceSynchronize();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double, std::milli> elapsed = end - start;
-  double avg_time = elapsed.count() / runs;
-  printf("  Kernel 18-OPT Avg Time: %.3f ms | %.1f GFLOPS\n",
-         avg_time,
-         (2.0 * rows * cols * inners) / (avg_time * 1e6));
-
-  free_block_pattern_metadata(A_meta);
-  free_b_pattern_metadata(B_meta);
-  return true;
-}
-
-bool run_esmm_combined_v2_no_check(int rows, int cols, int inners, float *d_A,
-                                    float *d_B, float *d_C, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Preprocess A matrix for row-level sparsity
-  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
-
-  // Preprocess B matrix for column-level sparsity
-  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
-
-  // Time kernel execution separately
-  auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < runs; i++) {
-    esmm_combined_blockwise_v2<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
-                                A_meta.d_blockPatterns, B_meta.d_blockPatterns,
-                                A_meta.numKBlocks, B_meta.numNBlocks);
-  }
-  cudaDeviceSynchronize();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double, std::milli> elapsed = end - start;
-  double avg_time = elapsed.count() / runs;
-  printf("  Kernel 21 Avg Time: %.3f ms | %.1f GFLOPS\n",
-         avg_time,
-         (2.0 * rows * cols * inners) / (avg_time * 1e6));
-
-  free_block_pattern_metadata(A_meta);
-  free_b_pattern_metadata(B_meta);
-  return true;
-}
-
-// ============================================================================
-// cuSPARSE FUNCTIONS (Kernel 19)
-// ============================================================================
-
-void run_cuSparse(int rows, int cols, int inners, float *d_A, float *d_B,
-                  float *d_C, float *h_C, int runs) {
-  cusparseHandle_t handle;
-  cusparseCreate(&handle);
-
-  const float alpha = 1.0f;
-  const float beta = 0.0f;
-
-  // Create matrix descriptors
-  cusparseSpMatDescr_t matA;
-  cusparseDnMatDescr_t matB, matC;
-
-  // Create dense matrix descriptors for B and C
-  cusparseCreateDnMat(&matB, inners, cols, cols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW);
-  cusparseCreateDnMat(&matC, rows, cols, cols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW);
-
-  // Count non-zeros in A
-  int nnz = 0;
-  float* h_A = (float*)malloc(rows * inners * sizeof(float));
-  cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
-  for (int i = 0; i < rows * inners; i++) {
-    if (h_A[i] != 0.0f) nnz++;
-  }
-
-  // Convert A to CSR format
-  int* h_csrRowPtr = (int*)malloc((rows + 1) * sizeof(int));
-  int* h_csrColInd = (int*)malloc(nnz * sizeof(int));
-  float* h_csrVal = (float*)malloc(nnz * sizeof(float));
-
-  int idx = 0;
-  h_csrRowPtr[0] = 0;
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < inners; j++) {
-      float val = h_A[i * inners + j];
-      if (val != 0.0f) {
-        h_csrVal[idx] = val;
-        h_csrColInd[idx] = j;
-        idx++;
-      }
-    }
-    h_csrRowPtr[i + 1] = idx;
-  }
-
-  // Copy CSR data to device
-  int *d_csrRowPtr, *d_csrColInd;
-  float *d_csrVal;
-  cudaMalloc(&d_csrRowPtr, (rows + 1) * sizeof(int));
-  cudaMalloc(&d_csrColInd, nnz * sizeof(int));
-  cudaMalloc(&d_csrVal, nnz * sizeof(float));
-  cudaMemcpy(d_csrRowPtr, h_csrRowPtr, (rows + 1) * sizeof(int), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_csrColInd, h_csrColInd, nnz * sizeof(int), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_csrVal, h_csrVal, nnz * sizeof(float), cudaMemcpyHostToDevice);
-
-  // Create sparse matrix A in CSR format
-  cusparseCreateCsr(&matA, rows, inners, nnz,
-                    d_csrRowPtr, d_csrColInd, d_csrVal,
-                    CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                    CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
-
-  // Allocate buffer for SpMM
-  size_t bufferSize = 0;
-  cusparseSpMM_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &alpha, matA, matB, &beta, matC,
-                          CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize);
-
-  void* dBuffer = nullptr;
-  cudaMalloc(&dBuffer, bufferSize);
-
-  // Run SpMM
-  for (int i = 0; i < runs; i++) {
-    cusparseSpMM(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                 CUSPARSE_OPERATION_NON_TRANSPOSE,
-                 &alpha, matA, matB, &beta, matC,
-                 CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, dBuffer);
-  }
-  cudaDeviceSynchronize();
-
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-
-  // Cleanup
-  cusparseDestroySpMat(matA);
-  cusparseDestroyDnMat(matB);
-  cusparseDestroyDnMat(matC);
-  cusparseDestroy(handle);
-  cudaFree(d_csrRowPtr);
-  cudaFree(d_csrColInd);
-  cudaFree(d_csrVal);
-  cudaFree(dBuffer);
-  free(h_A);
-  free(h_csrRowPtr);
-  free(h_csrColInd);
-  free(h_csrVal);
-}
-
-void run_cuSparse_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
-                           float *d_C, int runs) {
-  cusparseHandle_t handle;
-  cusparseCreate(&handle);
-
-  const float alpha = 1.0f;
-  const float beta = 0.0f;
-
-  // Create matrix descriptors
-  cusparseSpMatDescr_t matA;
-  cusparseDnMatDescr_t matB, matC;
-
-  // Create dense matrix descriptors for B and C
-  cusparseCreateDnMat(&matB, inners, cols, cols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW);
-  cusparseCreateDnMat(&matC, rows, cols, cols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW);
-
-  // Count non-zeros in A
-  int nnz = 0;
-  float* h_A = (float*)malloc(rows * inners * sizeof(float));
-  cudaMemcpy(h_A, d_A, rows * inners * sizeof(float), cudaMemcpyDeviceToHost);
-  for (int i = 0; i < rows * inners; i++) {
-    if (h_A[i] != 0.0f) nnz++;
-  }
-
-  // Convert A to CSR format
-  int* h_csrRowPtr = (int*)malloc((rows + 1) * sizeof(int));
-  int* h_csrColInd = (int*)malloc(nnz * sizeof(int));
-  float* h_csrVal = (float*)malloc(nnz * sizeof(float));
-
-  int idx = 0;
-  h_csrRowPtr[0] = 0;
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < inners; j++) {
-      float val = h_A[i * inners + j];
-      if (val != 0.0f) {
-        h_csrVal[idx] = val;
-        h_csrColInd[idx] = j;
-        idx++;
-      }
-    }
-    h_csrRowPtr[i + 1] = idx;
-  }
-
-  // Copy CSR data to device
-  int *d_csrRowPtr, *d_csrColInd;
-  float *d_csrVal;
-  cudaMalloc(&d_csrRowPtr, (rows + 1) * sizeof(int));
-  cudaMalloc(&d_csrColInd, nnz * sizeof(int));
-  cudaMalloc(&d_csrVal, nnz * sizeof(float));
-  cudaMemcpy(d_csrRowPtr, h_csrRowPtr, (rows + 1) * sizeof(int), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_csrColInd, h_csrColInd, nnz * sizeof(int), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_csrVal, h_csrVal, nnz * sizeof(float), cudaMemcpyHostToDevice);
-
-  // Create sparse matrix A in CSR format
-  cusparseCreateCsr(&matA, rows, inners, nnz,
-                    d_csrRowPtr, d_csrColInd, d_csrVal,
-                    CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                    CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F);
-
-  // Allocate buffer for SpMM
-  size_t bufferSize = 0;
-  cusparseSpMM_bufferSize(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          CUSPARSE_OPERATION_NON_TRANSPOSE,
-                          &alpha, matA, matB, &beta, matC,
-                          CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize);
-
-  void* dBuffer = nullptr;
-  cudaMalloc(&dBuffer, bufferSize);
-
-  // Run SpMM
-  for (int i = 0; i < runs; i++) {
-    cusparseSpMM(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                 CUSPARSE_OPERATION_NON_TRANSPOSE,
-                 &alpha, matA, matB, &beta, matC,
-                 CUDA_R_32F, CUSPARSE_SPMM_ALG_DEFAULT, dBuffer);
-  }
-  cudaDeviceSynchronize();
-
-  // Cleanup
-  cusparseDestroySpMat(matA);
-  cusparseDestroyDnMat(matB);
-  cusparseDestroyDnMat(matC);
-  cusparseDestroy(handle);
-  cudaFree(d_csrRowPtr);
-  cudaFree(d_csrColInd);
-  cudaFree(d_csrVal);
-  cudaFree(dBuffer);
-  free(h_A);
-  free(h_csrRowPtr);
-  free(h_csrColInd);
-  free(h_csrVal);
-}
-
-

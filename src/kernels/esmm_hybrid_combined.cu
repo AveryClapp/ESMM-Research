@@ -2,37 +2,40 @@
 
 /*
  * ============================================================================
- * Kernel 18: ESMM Combined A+B Sparsity
+ * Kernel 18: ESMM Combined A+B Sparsity (Sparse Direct Loading)
  * ============================================================================
  *
  * Strategy:
- *   Combines A-sparsity (K-dimension) and B-sparsity (N-dimension) for maximum
- *   performance. Each warp processes only the non-zero K elements and only
- *   computes non-zero N columns.
+ *   Combines A-sparsity (K-dimension) and B-sparsity (N-dimension) with
+ *   sparse direct loading - only loads B elements that are actually non-zero.
  *
  * Architecture:
  *   - A-Sparsity: 8×32 blocks (BK × WM), LUT-based offset lookup
- *   - B-Sparsity: 8×8 blocks (BK × TN), pattern-specialized multiply dispatch
- *   - Runtime: Load both patterns, outer loop on A count, inner dispatch on B pattern
- *   - Computation: Full compile-time unrolling for both dimensions
+ *   - B-Sparsity: 8×8 blocks (BK × TN), conditional load and multiply
+ *   - Loading: Check pattern bits, only load non-zero elements (saves bandwidth)
+ *   - Computation: Inline conditional FMAs (no dispatch overhead)
  *
  * Performance Characteristics:
- *   - Memory: A patterns (~64 KB) + B patterns (~256 KB) for 4096×4096
- *   - Divergence: Minimal (warp-uniform A pattern, thread-level B pattern)
- *   - Theoretical speedup: (1 - A_sparsity) × (1 - B_sparsity)
+ *   - Memory: Bandwidth proportional to actual B-sparsity (not full 100%)
+ *   - Divergence: Predicated loads/stores may reduce warp efficiency
+ *   - Theoretical speedup: (1 - A_sparsity) × compute + bandwidth savings from B
+ *
+ * Optimizations:
+ *   - No function call overhead (dispatch_b_pattern removed)
+ *   - Only loads elements that will be used
+ *   - Compiler may use predicated instructions for conditional loads
  *
  * Best for:
- *   Models with sparsity in both activations (A) and weights (B), such as:
- *   - Sparse transformers, MoE models, pruned networks
+ *   Sparse models with <50% B-density where bandwidth savings > overhead
  */
 
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"
 #include "../../include/pattern_lut.cuh"
 #include "../../include/unrolled_inners.cuh"
+#include "../../include/b_pattern_dispatch.cuh"
 #include "../preprocessors/a_preprocessor_hybrid.cu"
 #include "../preprocessors/b_preprocessor_hybrid.cu"
-#include "b_pattern_dispatch.cuh"
 #include <cuda_runtime.h>
 
 // ============================================================================
@@ -57,70 +60,60 @@ __device__ void compute_sparse_block_combined(
     float regM[WMITER * TM];
     float regN[WNITER * TN];
 
-    // Pre-compute nBlocks for each wSubColIdx (moved outside sparse loop)
     uint nBlocks[WNITER];
     uint8_t B_patterns_cache[WNITER];
-    bool all_dense = true;  // Check if all patterns are 0xFF (dense)
-    #pragma unroll
     for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
         const uint globalColBase = cCol * BN + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
-        nBlocks[wSubColIdx] = globalColBase >> 3;  // Bitshift instead of /TN (TN=8)
+        nBlocks[wSubColIdx] = globalColBase >> 3;
         const uint B_patternIdx = kBlock * numNBlocks + nBlocks[wSubColIdx];
         B_patterns_cache[wSubColIdx] = B_patterns[B_patternIdx];
-        if (B_patterns_cache[wSubColIdx] != 0xFF) all_dense = false;
     }
 
-    #pragma unroll
     for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
         const uint8_t dotIdx = A_offsets[sparse_idx];
 
-        #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
                 wSubRowIdx * WSUBM + threadRowInWarp * TM];
         }
 
-        #pragma unroll
+        // *** SPARSE DIRECT LOADING: Only load non-zero elements ***
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-            regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-            regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-            regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-            regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-            regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-            regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-            regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-            regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+            const uint8_t B_pattern = B_patterns_cache[wSubColIdx];
+            const uint baseAddr = (dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
+
+            // Load only elements indicated by pattern bits
+            // Predicated loads - compiler may optimize to predicated instructions
+            if (B_pattern & 0x01) regN[wSubColIdx * TN + 0] = Bs[baseAddr + 0];
+            if (B_pattern & 0x02) regN[wSubColIdx * TN + 1] = Bs[baseAddr + 1];
+            if (B_pattern & 0x04) regN[wSubColIdx * TN + 2] = Bs[baseAddr + 2];
+            if (B_pattern & 0x08) regN[wSubColIdx * TN + 3] = Bs[baseAddr + 3];
+            if (B_pattern & 0x10) regN[wSubColIdx * TN + 4] = Bs[baseAddr + 4];
+            if (B_pattern & 0x20) regN[wSubColIdx * TN + 5] = Bs[baseAddr + 5];
+            if (B_pattern & 0x40) regN[wSubColIdx * TN + 6] = Bs[baseAddr + 6];
+            if (B_pattern & 0x80) regN[wSubColIdx * TN + 7] = Bs[baseAddr + 7];
         }
 
-        // Compute outer product with B-sparsity dispatch
-        // Fast path: if all B blocks are dense, skip dispatch entirely
-        if (all_dense) {
-            #pragma unroll
-            for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-                #pragma unroll
-                for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                    multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-                        regM[wSubRowIdx], regN, threadResults);
-                }
-            }
-        } else {
-            // Slow path: dispatch based on B patterns
-            #pragma unroll
-            for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-                #pragma unroll
-                for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                    const uint8_t B_pattern = B_patterns_cache[wSubColIdx];
-                    dispatch_b_pattern(B_pattern, wSubRowIdx, wSubColIdx, WNITER,
-                        regM[wSubRowIdx], regN, threadResults);
-                }
+        // *** SPARSE DIRECT MULTIPLY: Only compute for non-zero elements ***
+        for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+            const float regM_val = regM[wSubRowIdx];
+            const int threadResRowBase = wSubRowIdx * (WNITER * TN);
+
+            for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+                const uint8_t B_pattern = B_patterns_cache[wSubColIdx];
+                const int regNBase = wSubColIdx * TN;
+                const int threadResBase = threadResRowBase + wSubColIdx * TN;
+
+                // Direct inline multiply for non-zero elements
+                // Each FMA is guarded by the same bit check used during loading
+                if (B_pattern & 0x01) threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+                if (B_pattern & 0x02) threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
+                if (B_pattern & 0x04) threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
+                if (B_pattern & 0x08) threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
+                if (B_pattern & 0x10) threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
+                if (B_pattern & 0x20) threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];
+                if (B_pattern & 0x40) threadResults[threadResBase + 6] += regM_val * regN[regNBase + 6];
+                if (B_pattern & 0x80) threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
             }
         }
     }
@@ -175,22 +168,21 @@ __global__ void __launch_bounds__(NUM_THREADS)
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
-        // *** Load A pattern for this warp tile's 8×32 block ***
         const uint A_blockId = globalWarpRow * numKBlocks + kBlock;
         const uint8_t A_pattern = A_blockPatterns[A_blockId];
 
-        // *** LUT-based offset lookup for A (eliminates runtime loop) ***
         const uint8_t count = PATTERN_LUT_BK8[A_pattern].count;
         const uint8_t* offsets = PATTERN_LUT_BK8[A_pattern].offsets;
 
         // Early exit if all zeros
+        /*
         if (count == 0) {
             A += BK;
             B += BK * N;
             continue;
         }
+        */
 
-        // Load A tile
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
                 &A[(innerRowA + offset) * K + innerColA * 4])[0];
@@ -200,7 +192,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
             As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
         }
 
-        // Load B tile
         for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
             reinterpret_cast<float4 *>(
                 &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
@@ -209,7 +200,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
         }
         __syncthreads();
 
-        // *** MAGIC: Switch on A count for compile-time unrolling, dispatch B patterns ***
         switch (count) {
             case 1:
                 compute_sparse_block_combined<BM, BN, BK, WM, WN, WNITER, TM, TN, 1>(
@@ -266,7 +256,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
         __syncthreads();
     }
 
-    // Write results back to global memory
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;

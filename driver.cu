@@ -141,20 +141,6 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 19: // cuSPARSE
-        if (check_results) {
-            run_cuSparse(rows, cols, inners, d_A, d_B, d_C, h_C, runs);
-        } else {
-            run_cuSparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        res = true; // Assume cuSPARSE always succeeds
-        break;
-    case 20: // ESMM Combined A+B Sparsity (Optimized - Conditional Loading)
-        res = run_esmm_combined_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        break;
-    case 21: // ESMM Combined A+B Sparsity V2 (Simplified Inline)
-        res = run_esmm_combined_v2_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -177,7 +163,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "10000000";
+    constexpr std::string_view sparsity = "11110000";
 
     // Default values
     std::vector<int> kernel_choices = {13};
@@ -230,7 +216,7 @@ int main(int argc, char *argv[]) {
 
 
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-    randomize_matrix(h_B, inners, cols);
+    randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
     memset(h_C, 0, rows * cols * sizeof(float));
 
     float *d_A, *d_B, *d_C;

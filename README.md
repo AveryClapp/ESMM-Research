@@ -117,5 +117,29 @@ Result: Overhead > Savings ❌
 
 **B-matrix sparsity cannot be profitably exploited on current GPU architectures** without fundamentally changing the thread-to-output mapping, which would break memory coalescing and reduce A-sparsity benefits.
 
-**Best approach**: Kernel 17 (A-only sparsity) remains optimal. 
+**Best approach**: Kernel 17 (A-only sparsity) remains optimal.
+
+### Potential Future Direction: Coarse-Grained Block Sparsity
+
+One untested approach that **might** work for structured sparsity:
+
+**Idea**: Check B sparsity at the granularity where all threads see the same decision (16-column blocks for WSUBN=16).
+
+```cuda
+// Preprocessing: Is this entire 16×8 tile zero?
+coarse_bit = (any non-zero in 16-col × BK-row tile?) ? 1 : 0
+
+// Runtime: Warp-uniform decision
+if (coarse_bit == 0) {
+    // ALL 32 threads skip together - no divergence! ✅
+    continue;
+}
+// Otherwise, do fine-grained checking per thread
+```
+
+**When it works**: Sparsity is "chunky" at 16+ column scale (e.g., entire column blocks are zero)
+
+**When it fails**: Uniform patterns like `"10000000"` have non-zeros in every 16-column block → no coarse skipping possible
+
+**Why not tested**: Natural/random sparsity patterns rarely have large contiguous zero regions. Would only help for artificially structured matrices (e.g., block-diagonal with large zero off-diagonal regions). 
 

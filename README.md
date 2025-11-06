@@ -45,17 +45,5 @@ Detailed walkthrough of our current kernel [here](https://github.com/AveryClapp/
 - **Pattern Processing**: 8-element sparsity pattern handling
 
 ## Next Steps
-
-### Improving Hybrid Kernel (K17)
-After consolidating to our two best kernels, there are several low-hanging optimizations for the block-wise uniform approach:
-
-- **Add kernel timing visibility**: Currently only preprocessing time is displayed, making it hard to see actual compute performance. Need to add timing around the kernel loop and report GFLOPS.
-
-- **Profile offset reconstruction overhead**: The offset array reconstruction from bitmask happens every K-block (`for (int i = 0; i < BK; i++) if (pattern & (1 << i))`). Could potentially use `__popc()` for count and a lookup table for offsets since there are only 256 possible patterns.
-
-- **Optimize pattern broadcast**: All 32 threads load the same pattern byte. While cache handles this well, using `__shfl_sync` to broadcast from lane 0 would reduce memory traffic.
-
-- **Consider preprocessing caching**: For research workflows with repeated runs on the same matrix, preprocessing runs every time. Could cache results keyed by matrix pointer.
-
-- **LUT-based offset lookup**: Replace runtime reconstruction with a 256-entry lookup table (1.25KB total). Each entry stores count + offsets, eliminating the bit-checking loop entirely.
+ Investigating B sparisty still. The problem is that A is fast because of warp level skipping but B is just thread level skipping which doesnt really do anything. 
 

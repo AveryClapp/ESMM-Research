@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 18; i++) {
+    for (int i = 1; i <= 19; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 18; i++) {
+    for (int i = start; i <= end && i <= 19; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 18) {
+    if (kernel >= 1 && kernel <= 19) {
       kernels.push_back(kernel);
     }
   }
@@ -71,6 +71,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 16: return "ESMM Pattern-Specialized (Zero Overhead)";
     case 17: return "ESMM Block-wise Uniform (Per-Warp Pattern Encoding)";
     case 18: return "ESMM Combined A+B Sparsity";
+    case 19: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";
     default: return "Unknown Kernel";
   }
 }
@@ -83,10 +84,10 @@ void print_usage(const char* program_name) {
   cout << "  0b, --preprocess-b    Run B matrix preprocessing verification" << endl;
   cout << "  [size] [runs]         Optional: matrix size (default 1024) and runs (default 10)" << endl;
   cout << "\nKernel_choice: " << endl;
-  cout << "    Single kernel: 1-18 (run specific kernel)" << endl;
+  cout << "    Single kernel: 1-19 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
   cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-  cout << "    All: \"all\" (run all kernels 1-18)" << endl;
+  cout << "    All: \"all\" (run all kernels 1-19)" << endl;
   cout << "  runs: number of runs per kernel (default: 1)" << endl;
   cout << "  Options:" << endl;
   cout << "    --verbose, -v: Enable verbose output" << endl;

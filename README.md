@@ -114,7 +114,7 @@ Result: Overhead > Savings ❌
 ```
 
 ### Conclusion
-
+### TRANSPOSE B
 **B-matrix sparsity cannot be profitably exploited on current GPU architectures** without fundamentally changing the thread-to-output mapping, which would break memory coalescing and reduce A-sparsity benefits.
 
 **Best approach**: Kernel 17 (A-only sparsity) remains optimal.

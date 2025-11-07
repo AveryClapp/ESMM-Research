@@ -1004,10 +1004,10 @@ bool run_esmm_btranspose(int rows, int cols, int inners, float *d_A, float *d_B,
   // Preprocess B: transpose and analyze row-wise sparsity patterns
   BTPatternMetadata BT_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
 
-  // Run kernel with B^T
+  // Run kernel with original B (no longer need B^T!)
   for (int i = 0; i < runs; i++) {
     esmm_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, BT_meta.d_BT, d_C,
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 BT_meta.d_blockPatterns, BT_meta.numKBlocks);
   }
 
@@ -1050,7 +1050,7 @@ bool run_esmm_btranspose_no_check(int rows, int cols, int inners, float *d_A,
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
     esmm_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, BT_meta.d_BT, d_C,
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 BT_meta.d_blockPatterns, BT_meta.numKBlocks);
   }
   cudaDeviceSynchronize();

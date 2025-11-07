@@ -35,12 +35,17 @@
 #include "../preprocessors/b_transpose_preprocessor.cu"
 #include <cuda_runtime.h>
 
+#ifndef WARPSIZE
+#define WARPSIZE 32
+#endif
+
 // ============================================================================
 // Helper templates for compile-time unrolled computation with B^T sparsity
 // ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
-          const int WNITER, const int TM, const int TN, const int SIZE>
+          const int WNITER, const int TM, const int TN, const int SIZE,
+          const int AS_PAD, const int BTS_PAD>
 __device__ void compute_sparse_block_btranspose(
     const uint8_t* offsets,
     const uint warpRow, const uint warpCol,
@@ -59,25 +64,19 @@ __device__ void compute_sparse_block_btranspose(
     for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
         const uint8_t dotIdx = offsets[sparse_idx];
 
-        // Load from shared memory A - each thread loads different rows
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             #pragma unroll
             for (uint tm = 0; tm < TM; ++tm) {
-                regM[wSubRowIdx * TM + tm] = As[(dotIdx * BM) + warpRow * WM +
-                    wSubRowIdx * WSUBM + threadRowInWarp * TM + tm];
+                const uint m = warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM + tm;
+                regM[wSubRowIdx * TM + tm] = As[dotIdx + m * (BK + AS_PAD)];
             }
         }
 
-        // Load from shared memory B^T - all threads load same row (BROADCAST!)
-        // B^T is stored as [N][K], so for each output column, we need one B^T row
         #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-            // Local column within the BN tile (not global!)
             const uint localCol = warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
-
-            // B^T[localCol, k] - all threads load same value (broadcast from shared mem)
-            regN[wSubColIdx * TN] = BTs[localCol * BK + dotIdx];
+            regN[wSubColIdx * TN] = BTs[dotIdx + localCol * (BK + BTS_PAD)];
         }
 
         // Compute outer product: each thread computes TM × TN = 8×1 outputs
@@ -105,7 +104,7 @@ template <const int BM, const int BN, const int BK, const int WM, const int WN,
           const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
     esmm_btranspose(int M, int N, int K,
-                    float *A, float *BT, float *C,
+                    float *A, float *B, float *C,
                     const uint8_t* __restrict__ blockPatterns,
                     const int numKBlocks) {
 
@@ -124,21 +123,28 @@ __global__ void __launch_bounds__(NUM_THREADS)
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    __shared__ float As[BM * BK];
-    __shared__ float BTs[BN * BK];  // B^T tile: BN rows × BK cols
+    // Padding to avoid bank conflicts (32 banks, 4-byte words)
+    // For BM=128, BK=8: each row is 8 floats, add 1 float padding
+    constexpr uint AS_PAD = 1;
+    constexpr uint BTS_PAD = 1;
+
+    __shared__ float As[(BK + AS_PAD) * BM];  // Column-major: [BK × BM] with padding
+    __shared__ float BTs[(BK + BTS_PAD) * BN];  // Column-major: [BK × BN] with padding
 
     A += cRow * BM * K;
-    BT += cCol * BN * K;  // B^T is N×K, so offset by rows
+    B += cCol * BN;  // B is K×N, offset by columns
     C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
 
     const uint innerRowA = threadIdx.x / (BK / 4);
     const uint innerColA = threadIdx.x % (BK / 4);
     constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
 
-    // For B^T (N×K), load similar to A
-    const uint innerRowBT = threadIdx.x / (BK / 4);
-    const uint innerColBT = threadIdx.x % (BK / 4);
-    constexpr uint rowStrideBT = (NUM_THREADS * 4) / BK;
+    // For B (K×N): distribute threads for coalesced loads
+    // Want consecutive threads to load consecutive memory locations
+    // B[k*N + n] - consecutive in N dimension
+    const uint innerRowB = threadIdx.x / (BN / 4);  // Which K-row (thread 0-31 → k=0, 32-63 → k=1, etc.)
+    const uint innerColB = threadIdx.x % (BN / 4);  // Which N-column group (0-31)
+    constexpr uint rowStrideB = (NUM_THREADS * 4) / BN;  // How many K-rows per iteration
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
@@ -148,93 +154,89 @@ __global__ void __launch_bounds__(NUM_THREADS)
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
-        // Load B^T pattern for this column block
-        // All threads in warp computing columns need same pattern → warp-uniform!
+
         const uint blockId = globalColBlock * numKBlocks + kBlock;
         const uint8_t pattern = blockPatterns[blockId];
 
         const uint8_t count = PATTERN_LUT_BK8[pattern].count;
         const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
 
-        // Warp-uniform skip: if entire B^T row is zero, all threads skip together!
         if (count == 0) {
             A += BK;
-            BT += BK;
+            B += BK * N;  // B is K×N, advance by BK rows
             continue;
         }
 
-        // Load A tile (BM × BK) into shared memory
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
                 &A[(innerRowA + offset) * K + innerColA * 4])[0];
-            As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-            As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-            As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-            As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+            // Column-major with padding: As[k * (BK + AS_PAD) + m]
+            As[(innerColA * 4 + 0) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.x;
+            As[(innerColA * 4 + 1) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.y;
+            As[(innerColA * 4 + 2) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.z;
+            As[(innerColA * 4 + 3) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.w;
         }
 
-        // Load B^T tile (BN × BK) into shared memory
-        // B^T is N×K, so we load BN rows × BK columns
-        for (int8_t offset = 0; offset + rowStrideBT <= BN; offset += rowStrideBT) {
-            if (innerRowBT + offset < BN) {
-                const float4 tmp = reinterpret_cast<const float4 *>(
-                    &BT[(innerRowBT + offset) * K + innerColBT * 4])[0];
-                // Store in shared memory: BTs[row * BK + col]
-                BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 0] = tmp.x;
-                BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 1] = tmp.y;
-                BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 2] = tmp.z;
-                BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 3] = tmp.w;
-            }
-        }
+        // Load B (K×N) with coalesced access - one iteration for BK=8, rowStrideB=8
+        // Unrolled for performance
+        const float4 tmp = reinterpret_cast<const float4 *>(
+            &B[innerRowB * N + innerColB * 4])[0];
+
+        // Write transposed to shared: BTs[k + n * stride]
+        // This changes from B's row-major [K][N] to shared column-major [BK][BN]
+        BTs[innerRowB + (innerColB * 4 + 0) * (BK + BTS_PAD)] = tmp.x;
+        BTs[innerRowB + (innerColB * 4 + 1) * (BK + BTS_PAD)] = tmp.y;
+        BTs[innerRowB + (innerColB * 4 + 2) * (BK + BTS_PAD)] = tmp.z;
+        BTs[innerRowB + (innerColB * 4 + 3) * (BK + BTS_PAD)] = tmp.w;
         __syncthreads();
 
         // *** MAGIC: Switch on count for compile-time unrolling ***
         // All threads execute same case → warp-uniform!
         switch (count) {
             case 1:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 1>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 1, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 2:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 2>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 2, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 3:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 3>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 3, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 4:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 4>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 4, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 5:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 5>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 5, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 6:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 6>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 6, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 7:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 7>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 7, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 8:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 8>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 8, AS_PAD, BTS_PAD>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
         }
 
         A += BK;
-        BT += BK;
+        B += BK * N;  // B is K×N, advance by BK rows
         __syncthreads();
     }
 

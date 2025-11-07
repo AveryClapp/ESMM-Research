@@ -50,18 +50,19 @@ __global__ void transpose_matrix(
 }
 
 /*
- * B^T Row-wise Pattern Preprocessing
+ * B Column-wise Pattern Preprocessing (No Transpose!)
  *
- * Analyzes B^T (N×K) in 8×WN blocks (BK × warp-width)
+ * Analyzes B (K×N) columns in WN-wide vertical strips (WN columns × BK rows)
  * Creates 8-bit patterns indicating which of BK=8 elements are non-zero
  * All threads in warp see same pattern → enables warp-uniform execution
  *
- * Output: (N/WN) × (K/BK) patterns
+ * Conceptually: treats WN consecutive columns as a "logical row" for pattern analysis
+ * Output: (N/WN) × (K/BK) patterns (same as before, but reading columns not rows)
  */
 template <const int BK, const int WN, const int NUM_THREADS>
-__global__ void preprocess_bt_rowwise_patterns(
-    int N, int K,
-    const float* __restrict__ BT,
+__global__ void preprocess_b_column_patterns(
+    int K, int N,
+    const float* __restrict__ B,
     uint8_t* __restrict__ blockPatterns
 ) {
     constexpr int WARP_SIZE = 32;
@@ -75,43 +76,43 @@ __global__ void preprocess_bt_rowwise_patterns(
 
     const int warpId = threadIdx.x / WARP_SIZE;
     const int laneId = threadIdx.x % WARP_SIZE;
-    const int globalWarpRow = blockIdx.x * (NUM_THREADS / WARP_SIZE) + warpId;
+    const int globalWarpCol = blockIdx.x * (NUM_THREADS / WARP_SIZE) + warpId;
 
-    if (globalWarpRow >= numNBlocks) return;
+    if (globalWarpCol >= numNBlocks) return;
 
-    const int globalRowBase = globalWarpRow * WN;
+    const int globalColBase = globalWarpCol * WN;
 
     // Process K-blocks in batches of 4
     for (int kBlockBatch = 0; kBlockBatch < numKBlocks; kBlockBatch += 4) {
         constexpr int LOADS_PER_THREAD = (TILE_N * TILE_K) / NUM_THREADS;
 
-        // Load tile into shared memory with coalesced access
+        // Load tile from B (K×N) - reading columns, which is strided
         #pragma unroll
         for (int i = 0; i < LOADS_PER_THREAD; i++) {
             const int flatIdx = threadIdx.x + i * NUM_THREADS;
-            const int row = flatIdx / TILE_K;
-            const int col = flatIdx % TILE_K;
+            const int k = flatIdx / TILE_N;  // which k within tile
+            const int n = flatIdx % TILE_N;  // which n within tile
 
-            const int globalRow = globalRowBase + row;
-            const int globalCol = kBlockBatch * BK + col;
+            const int globalK = kBlockBatch * BK + k;
+            const int globalN = globalColBase + n;
 
-            if (globalRow < N && globalCol < K) {
-                smem[col][row] = BT[globalRow * K + globalCol];
+            if (globalK < K && globalN < N) {
+                smem[k][n] = B[globalK * N + globalN];  // Reading columns (strided)
             } else {
-                smem[col][row] = 0.0f;
+                smem[k][n] = 0.0f;
             }
         }
 
         __syncthreads();
 
-        // Each warp processes WN rows (32 rows for WN=32)
-        // All threads in warp OR together patterns across their WN rows
+        // Each warp processes WN columns (32 columns for WN=32)
+        // All threads in warp OR together patterns across their WN columns
         #pragma unroll
         for (int kb = 0; kb < 4 && (kBlockBatch + kb) < numKBlocks; kb++) {
             uint8_t threadPattern = 0;
             const int kOffset = kb * BK;
 
-            // Each thread checks 8 elements from its assigned row
+            // Each thread checks BK=8 elements from its assigned column
             #pragma unroll
             for (int k = 0; k < BK; k++) {
                 if (laneId < WN && smem[kOffset + k][laneId] != 0.0f) {
@@ -120,7 +121,7 @@ __global__ void preprocess_bt_rowwise_patterns(
             }
 
             // Warp-level reduction: OR all patterns together
-            // Result: pattern representing OR of all WN rows
+            // Result: pattern representing OR of all WN columns
             uint8_t warpPattern = threadPattern;
             #pragma unroll
             for (int offset = 16; offset > 0; offset >>= 1) {
@@ -129,7 +130,7 @@ __global__ void preprocess_bt_rowwise_patterns(
 
             // First thread writes result
             if (laneId == 0) {
-                const int outIdx = globalWarpRow * numKBlocks + kBlockBatch + kb;
+                const int outIdx = globalWarpCol * numKBlocks + kBlockBatch + kb;
                 blockPatterns[outIdx] = warpPattern;
             }
         }
@@ -139,24 +140,20 @@ __global__ void preprocess_bt_rowwise_patterns(
 }
 
 /*
- * Complete B-Transpose Preprocessing Pipeline
+ * B Pattern Preprocessing (No Transpose!)
  *
- * 1. Transpose B (K×N) to B^T (N×K)
- * 2. Analyze B^T row-wise sparsity patterns
- * 3. Return metadata for runtime kernel
+ * 1. Analyze B (K×N) column-wise sparsity patterns
+ * 2. Return metadata for runtime kernel
  */
 struct BTPatternMetadata {
-    float* d_BT;               // Transposed matrix (N×K)
+    float* d_BT;               // NOW UNUSED - kept for API compatibility, set to nullptr
     uint8_t* d_blockPatterns;  // Pattern for each BK×WN block
     int numNBlocks;            // Number of N-blocks (N / WN)
     int numKBlocks;            // Number of K-blocks (K / BK)
 };
 
 inline void free_bt_pattern_metadata(BTPatternMetadata& meta) {
-    if (meta.d_BT) {
-        cudaFree(meta.d_BT);
-        meta.d_BT = nullptr;
-    }
+    // d_BT is no longer allocated, so skip it
     if (meta.d_blockPatterns) {
         cudaFree(meta.d_blockPatterns);
         meta.d_blockPatterns = nullptr;
@@ -167,37 +164,9 @@ BTPatternMetadata preprocess_b_transpose(float* d_B, int K, int N, int WN, int B
     BTPatternMetadata meta;
     meta.numNBlocks = N / WN;
     meta.numKBlocks = K / BK;
+    meta.d_BT = nullptr;  // No longer needed!
 
-    // Allocate B^T
-    cudaMalloc(&meta.d_BT, N * K * sizeof(float));
-
-    // Step 1: Transpose B → B^T
-    constexpr int TILE_DIM = 32;
-    constexpr int BLOCK_ROWS = 8;
-
-    dim3 transposeBlock(TILE_DIM, BLOCK_ROWS);
-    dim3 transposeGrid(CEIL_DIV(N, TILE_DIM), CEIL_DIV(K, TILE_DIM));
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-
-    transpose_matrix<TILE_DIM, BLOCK_ROWS>
-        <<<transposeGrid, transposeBlock>>>(K, N, d_B, meta.d_BT);
-
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    float transpose_ms = 0;
-    cudaEventElapsedTime(&transpose_ms, start, stop);
-
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Transpose kernel error: %s\n", cudaGetErrorString(error));
-    }
-
-    // Step 2: Analyze B^T row-wise patterns
+    // Analyze B column-wise patterns directly (no transpose!)
     const int totalBlocks = meta.numNBlocks * meta.numKBlocks;
     cudaMalloc(&meta.d_blockPatterns, totalBlocks * sizeof(uint8_t));
     cudaMemset(meta.d_blockPatterns, 0, totalBlocks * sizeof(uint8_t));
@@ -209,13 +178,16 @@ BTPatternMetadata preprocess_b_transpose(float* d_B, int K, int N, int WN, int B
     dim3 blockDim(NUM_THREADS);
     dim3 gridDim(numBlocks);
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
     cudaEventRecord(start);
 
     if (BK == 8 && WN == 32) {
-        preprocess_bt_rowwise_patterns<8, 32, NUM_THREADS>
-            <<<gridDim, blockDim>>>(N, K, meta.d_BT, meta.d_blockPatterns);
+        preprocess_b_column_patterns<8, 32, NUM_THREADS>
+            <<<gridDim, blockDim>>>(K, N, d_B, meta.d_blockPatterns);
     } else {
-        printf("Error: Unsupported BK=%d, WN=%d combination for B^T preprocessing\n", BK, WN);
+        printf("Error: Unsupported BK=%d, WN=%d combination for B preprocessing\n", BK, WN);
     }
 
     cudaEventRecord(stop);
@@ -224,20 +196,16 @@ BTPatternMetadata preprocess_b_transpose(float* d_B, int K, int N, int WN, int B
     float pattern_ms = 0;
     cudaEventElapsedTime(&pattern_ms, start, stop);
 
-    error = cudaGetLastError();
+    cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
-        printf("B^T pattern preprocessing kernel error: %s\n", cudaGetErrorString(error));
+        printf("B pattern preprocessing kernel error: %s\n", cudaGetErrorString(error));
     }
 
     float metadataKB = totalBlocks / 1024.0f;
-    float transposeGB = (N * K * sizeof(float) * 2) / 1e9f; // Read B + Write B^T
 
-    printf("B-Transpose preprocessing:\n");
-    printf("  Transpose: %.3f ms (%.2f GB/s)\n",
-           transpose_ms, transposeGB / (transpose_ms / 1000.0f));
+    printf("B preprocessing (no transpose!):\n");
     printf("  Patterns:  %.3f ms (%d blocks, %.1f KB metadata)\n",
            pattern_ms, totalBlocks, metadataKB);
-    printf("  Total:     %.3f ms\n", transpose_ms + pattern_ms);
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);

@@ -110,3 +110,31 @@ inline void free_b_pattern_metadata(BMatrixPatternMetadata& meta) {
         meta.d_blockPatterns = nullptr;
     }
 }
+
+// ============================================================================
+// Combined A+B Pattern Encoding (Kernel 20: Dual-Matrix Sparsity)
+// ============================================================================
+// Use case: Exploit sparsity in both A (row-wise) and B (column-wise)
+// A patterns: 8×32 blocks (BK × WM) - warp-uniform row patterns
+// B patterns: 8×32 blocks (BK × WN) - warp-uniform column patterns via transpose
+// Memory: 2 separate pattern arrays
+// Architecture: TM=8, TN=1 (transpose-friendly for B, handles A similarly to K19)
+
+struct DualPatternMetadata {
+    uint8_t* d_A_blockPatterns;  // A matrix patterns (warp-rows × K-blocks)
+    uint8_t* d_B_blockPatterns;  // B^T matrix patterns (warp-cols × K-blocks)
+    int numAWarpRows;            // Number of A warp rows (M / WM_A)
+    int numBWarpCols;            // Number of B warp cols (N / WN_B)
+    int numKBlocks;              // Number of K-blocks (K / BK)
+};
+
+inline void free_dual_pattern_metadata(DualPatternMetadata& meta) {
+    if (meta.d_A_blockPatterns) {
+        cudaFree(meta.d_A_blockPatterns);
+        meta.d_A_blockPatterns = nullptr;
+    }
+    if (meta.d_B_blockPatterns) {
+        cudaFree(meta.d_B_blockPatterns);
+        meta.d_B_blockPatterns = nullptr;
+    }
+}

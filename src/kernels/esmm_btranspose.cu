@@ -83,12 +83,13 @@ __device__ void compute_sparse_block_btranspose(
             regM[wSubRowIdx * TM + 7] = As[baseAddr + 7];
         }
 
-        // Load B value - single load for TN=1
+        // Load B value - use pointer arithmetic instead of multiply
+        // Pre-compute base pointer for this k-slice
+        const float* BTs_row = &BTs[dotIdx * BN];
         #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             const uint localCol = warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
-            // Column-major: BTs[k * BN + n]
-            regN[wSubColIdx * TN] = BTs[dotIdx * BN + localCol];
+            regN[wSubColIdx * TN] = BTs_row[localCol];
         }
 
         // Compute outer product: 8 A values * 1 B value - manually unrolled
@@ -142,7 +143,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
     // Use column-major layout with padding to avoid bank conflicts
     __shared__ float As[(BK + 1) * BM];  // Column-major: [BK × BM] with padding
-    __shared__ float BTs[(BK + 1) * BN];  // Column-major: [BK × BN] with padding
+    __shared__ float BTs[BK * BN];  // Column-major: [BK × BN] - remove padding to simplify addressing
 
     A += cRow * BM * K;
     B += cCol * BN;  // B is K×N, offset by columns

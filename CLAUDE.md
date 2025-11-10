@@ -81,10 +81,13 @@ Early kernels focused on exploiting sparsity in the A matrix (rows of output).
 - Architecture: 32×64 warp tiles, TM=1, TN=8
 - Each warp computes same rows → shares row patterns
 
-### Kernel 18: Combined A+B Sparsity (Prototype)
-- **12.3 TFLOPS** - slower due to complexity
-- Attempts to check both A and B patterns
-- Challenge: Hard to maintain warp-uniformity for both simultaneously
+### Kernel 18: Combined A+B Sparsity (Current Best Path)
+- **12.3 TFLOPS** - room for optimization
+- Architecture: TM=1, TN=8 (keeps K17's fast layout)
+- A patterns: Warp-uniform (8×32 blocks)
+- B patterns: Per-thread (8×8 blocks), predicated loads
+- **Key Insight**: Don't force B patterns to be warp-uniform!
+- Uses conditional loading - only loads non-zero B elements
 
 ### Kernel 19: B-Transpose Approach (B-Sparsity)
 - **4.0 TFLOPS** - significantly slower than K17
@@ -172,24 +175,119 @@ TM, TN = 1/8    // Thread tile size
 NUM_THREADS = 256
 ```
 
+## Key Findings & Research Direction
+
+### ✅ **Warp-Uniform B-Sparsity is a Dead End**
+- K19's approach (TM=8, TN=1 with warp-uniform B patterns) is **10-12× slower** than K17
+- TM=8, TN=1 layout fundamentally incompatible with GPU architecture
+- Lack of ILP kills performance - GPUs need vectorized operations
+- **Conclusion**: Don't try to force warp-uniformity for B patterns
+
+### ✅ **The Path Forward: K18's Hybrid Approach**
+- Keep TM=1, TN=8 (proven fast layout)
+- A patterns: Warp-uniform (8×32 blocks) → zero divergence
+- B patterns: Per-thread (8×8 blocks) → some divergence, but acceptable
+- Use predicated loads for B - modern GPUs handle this efficiently
+- **Current**: 12.3 TFLOPS - shows potential
+- **Target**: Optimize to >20 TFLOPS
+
+### 📊 **B-Pattern Dispatch Overhead Analysis**
+
+**Measured Performance:**
+- K17 (A-only): 22.7 TFLOPS
+- K18 (A+B): 12.3 TFLOPS
+- **Overhead: 45% performance loss from B-pattern checking**
+
+**Where Does the 45% Come From?**
+1. Pattern memory reads: 1 byte per 8×8 block
+2. 16 bit-tests per thread per iteration (8 for loads + 8 for FMAs)
+3. Predicated instruction overhead
+4. Some warp divergence when patterns differ across threads
+
+**Optimization Attempts (All Failed):**
+
+1. **LUT-based pattern dispatch**
+   - Idea: Replace bit-checking with switch on pattern count
+   - Result: 14× slower (0.879 TFLOPS)
+   - Why: Repeated LUT lookups in inner loops too expensive
+
+2. **Cached LUT dispatch**
+   - Idea: Pre-cache LUT data outside inner loops
+   - Result: 8× slower (1.58 TFLOPS)
+   - Why: Switch statement overhead still dominates
+
+3. **Hierarchical count→pattern dispatch**
+   - Idea: Dispatch on count first, then use templated functions
+   - Result: Too slow (killed after 30+ seconds)
+   - Why: Switch statements in tight loops add control overhead
+
+4. **Fast-path for dense/zero blocks**
+   - Idea: Special-case 0xFF and 0x00 patterns
+   - Result: Not tested (killed, likely similar issues)
+   - Why: Adds more branching to already tight loop
+
+**Key Insight: The Original Approach is Near-Optimal**
+- Simple conditional bit-checking: `if (pattern & 0x01) load/fma`
+- Modern GPUs compile these to **predicated instructions** (very efficient!)
+- Any dispatch mechanism adds more overhead than it saves
+- Predicated loads/FMAs are the right primitive for this problem
+
+### 🔬 **Why B-Transpose Doesn't Work: The ILP Problem**
+
+**A-Sparsity (K17) - Works Perfectly:**
+```
+Warp tile: 32 rows × 64 columns
+Thread tile: TM=1, TN=8
+
+All 32 threads compute SAME output rows
+→ All threads need SAME A data (warp-uniform!)
+→ TM=1, TN=8: Each thread computes result[0-7] += a * b[0-7]
+→ 8 independent FMAs → HIGH ILP!
+```
+
+**B-Sparsity (K19) - Fundamental Incompatibility:**
+```
+Warp tile: 64 rows × 32 columns (flipped!)
+Thread tile: TM=8, TN=1
+
+All 32 threads compute SAME output columns
+→ All threads need SAME B^T rows (warp-uniform!)
+→ BUT: TM=8, TN=1: Each thread computes result[0-7] += a[0-7] * b
+→ 8 sequential FMAs → ZERO ILP!
+```
+
+**The Asymmetry:**
+- Can't use TM=1, TN=8 with B-transpose because different threads need different columns
+- Different columns = different B^T rows = different patterns = divergence
+- **Warp-uniform B-patterns require TM=8, TN=1 which is fundamentally slow**
+- This is why K19 is 10× slower than K17 despite zero divergence
+
+**Why Can't We Model B Like A?**
+- A-sparsity: warp-uniform rows + fast layout (TM=1, TN=8) = **compatible** ✓
+- B-sparsity: warp-uniform columns + fast layout (TM=1, TN=8) = **incompatible** ✗
+- The fast layout forces different threads to compute different columns
+- Different columns → different patterns → divergence or slow layout
+
 ## Open Research Questions
 
-1. **Can we achieve warp-uniform checking for both A and B patterns simultaneously?**
-   - Current approaches force a choice between A or B sparsity
-   - Need architectural innovation to handle both
+1. **How to optimize K18's B pattern checking?**
+   - Current: Per-thread conditional loads (some divergence)
+   - Can we reduce overhead with better pattern granularity?
+   - Should we use different BK sizes for A vs B patterns?
 
-2. **Is B-transpose approach viable with better tuning?**
-   - K19 is 5.7× slower than K17
-   - Is this fundamental or fixable with optimization?
+2. **What's the optimal B pattern block size?**
+   - Current: 8×8 (BK × TN)
+   - Smaller blocks (4×8)? Larger blocks (8×16)?
+   - Trade-off: finer grain vs. more pattern overhead
 
-3. **What's the optimal thread tile layout for dual-sparsity?**
-   - TM=1, TN=8 works great for A-sparsity
-   - TM=8, TN=1 needed for B-sparsity (but performs poorly)
-   - Can we use mixed layouts or 2D layouts (TM=4, TN=4)?
+3. **Can we combine pattern checks more efficiently?**
+   - Currently checks A, then conditionally checks B
+   - Can we pre-compute combined patterns?
+   - Bitwise AND of A and B patterns?
 
-4. **Can we reduce preprocessing overhead?**
-   - Current: Analyze patterns before kernel launch
-   - Alternative: Online pattern detection during first few tiles?
+4. **Is there a better memory layout for combined sparsity?**
+   - Current: Row-major shared memory
+   - Would tiled layouts help?
 
 ## Development Tips
 

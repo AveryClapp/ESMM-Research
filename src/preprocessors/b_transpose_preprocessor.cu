@@ -186,6 +186,9 @@ BTPatternMetadata preprocess_b_transpose(float* d_B, int K, int N, int WN, int B
     if (BK == 8 && WN == 32) {
         preprocess_b_column_patterns<8, 32, NUM_THREADS>
             <<<gridDim, blockDim>>>(K, N, d_B, meta.d_blockPatterns);
+    } else if (BK == 8 && WN == 64) {
+        preprocess_b_column_patterns<8, 64, NUM_THREADS>
+            <<<gridDim, blockDim>>>(K, N, d_B, meta.d_blockPatterns);
     } else {
         printf("Error: Unsupported BK=%d, WN=%d combination for B preprocessing\n", BK, WN);
     }

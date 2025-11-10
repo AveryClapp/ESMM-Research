@@ -44,8 +44,7 @@
 // ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
-          const int WNITER, const int TM, const int TN, const int SIZE,
-          const int AS_PAD, const int BTS_PAD>
+          const int WNITER, const int TM, const int TN, const int SIZE>
 __device__ void compute_sparse_block_btranspose(
     const uint8_t* offsets,
     const uint warpRow, const uint warpCol,
@@ -60,37 +59,55 @@ __device__ void compute_sparse_block_btranspose(
     float regM[WMITER * TM];
     float regN[WNITER * TN];
 
+    // Manually unroll everything like K17 for maximum ILP
     #pragma unroll
     for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
         const uint8_t dotIdx = offsets[sparse_idx];
 
+        // Load A values - manually unrolled for TM=8
+        // Pre-compute base address
+        const uint mBase = warpRow * WM + threadRowInWarp * TM;
+
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-            #pragma unroll
-            for (uint tm = 0; tm < TM; ++tm) {
-                const uint m = warpRow * WM + wSubRowIdx * WSUBM + threadRowInWarp * TM + tm;
-                regM[wSubRowIdx * TM + tm] = As[dotIdx + m * (BK + AS_PAD)];
-            }
+            const uint mOffset = mBase + wSubRowIdx * WSUBM;
+            // Column-major: As[k * BM + m] - consecutive loads!
+            const uint baseAddr = dotIdx * BM + mOffset;
+            regM[wSubRowIdx * TM + 0] = As[baseAddr + 0];
+            regM[wSubRowIdx * TM + 1] = As[baseAddr + 1];
+            regM[wSubRowIdx * TM + 2] = As[baseAddr + 2];
+            regM[wSubRowIdx * TM + 3] = As[baseAddr + 3];
+            regM[wSubRowIdx * TM + 4] = As[baseAddr + 4];
+            regM[wSubRowIdx * TM + 5] = As[baseAddr + 5];
+            regM[wSubRowIdx * TM + 6] = As[baseAddr + 6];
+            regM[wSubRowIdx * TM + 7] = As[baseAddr + 7];
         }
 
+        // Load B value - single load for TN=1
         #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             const uint localCol = warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
-            regN[wSubColIdx * TN] = BTs[dotIdx + localCol * (BK + BTS_PAD)];
+            // Column-major: BTs[k * BN + n]
+            regN[wSubColIdx * TN] = BTs[dotIdx * BN + localCol];
         }
 
-        // Compute outer product: each thread computes TM × TN = 8×1 outputs
+        // Compute outer product: 8 A values * 1 B value - manually unrolled
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             #pragma unroll
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                #pragma unroll
-                for (uint tm = 0; tm < TM; ++tm) {
-                    const int resIdx = (wSubRowIdx * TM + tm) * (WNITER * TN) +
-                                      wSubColIdx * TN;
-                    threadResults[resIdx] += regM[wSubRowIdx * TM + tm] *
-                                             regN[wSubColIdx * TN];
-                }
+                const float b_val = regN[wSubColIdx * TN];
+                const int resBase = wSubRowIdx * TM * (WNITER * TN) + wSubColIdx * TN;
+
+                // 8 independent multiply-accumulates for ILP
+                threadResults[resBase + 0 * (WNITER * TN)] += regM[wSubRowIdx * TM + 0] * b_val;
+                threadResults[resBase + 1 * (WNITER * TN)] += regM[wSubRowIdx * TM + 1] * b_val;
+                threadResults[resBase + 2 * (WNITER * TN)] += regM[wSubRowIdx * TM + 2] * b_val;
+                threadResults[resBase + 3 * (WNITER * TN)] += regM[wSubRowIdx * TM + 3] * b_val;
+                threadResults[resBase + 4 * (WNITER * TN)] += regM[wSubRowIdx * TM + 4] * b_val;
+                threadResults[resBase + 5 * (WNITER * TN)] += regM[wSubRowIdx * TM + 5] * b_val;
+                threadResults[resBase + 6 * (WNITER * TN)] += regM[wSubRowIdx * TM + 6] * b_val;
+                threadResults[resBase + 7 * (WNITER * TN)] += regM[wSubRowIdx * TM + 7] * b_val;
             }
         }
     }
@@ -123,13 +140,9 @@ __global__ void __launch_bounds__(NUM_THREADS)
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    // Padding to avoid bank conflicts (32 banks, 4-byte words)
-    // For BM=128, BK=8: each row is 8 floats, add 1 float padding
-    constexpr uint AS_PAD = 1;
-    constexpr uint BTS_PAD = 1;
-
-    __shared__ float As[(BK + AS_PAD) * BM];  // Column-major: [BK × BM] with padding
-    __shared__ float BTs[(BK + BTS_PAD) * BN];  // Column-major: [BK × BN] with padding
+    // Use column-major layout with padding to avoid bank conflicts
+    __shared__ float As[(BK + 1) * BM];  // Column-major: [BK × BM] with padding
+    __shared__ float BTs[(BK + 1) * BN];  // Column-major: [BK × BN] with padding
 
     A += cRow * BM * K;
     B += cCol * BN;  // B is K×N, offset by columns
@@ -170,66 +183,67 @@ __global__ void __launch_bounds__(NUM_THREADS)
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
                 &A[(innerRowA + offset) * K + innerColA * 4])[0];
-            // Column-major with padding: As[k * (BK + AS_PAD) + m]
-            As[(innerColA * 4 + 0) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.x;
-            As[(innerColA * 4 + 1) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.y;
-            As[(innerColA * 4 + 2) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.z;
-            As[(innerColA * 4 + 3) + (innerRowA + offset) * (BK + AS_PAD)] = tmp.w;
+            // Column-major with padding: As[k * BM + m]
+            As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+            As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+            As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+            As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
         }
 
-        // Load B (K×N) with coalesced access - one iteration for BK=8, rowStrideB=8
-        // Unrolled for performance
-        const float4 tmp = reinterpret_cast<const float4 *>(
-            &B[innerRowB * N + innerColB * 4])[0];
+        // Load B (K×N) and transpose to column-major BTs
+        for (int32_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+            const float4 tmp = reinterpret_cast<const float4 *>(
+                &B[(innerRowB + offset) * N + innerColB * 4])[0];
 
-        // Write transposed to shared: BTs[k + n * stride]
-        // This changes from B's row-major [K][N] to shared column-major [BK][BN]
-        BTs[innerRowB + (innerColB * 4 + 0) * (BK + BTS_PAD)] = tmp.x;
-        BTs[innerRowB + (innerColB * 4 + 1) * (BK + BTS_PAD)] = tmp.y;
-        BTs[innerRowB + (innerColB * 4 + 2) * (BK + BTS_PAD)] = tmp.z;
-        BTs[innerRowB + (innerColB * 4 + 3) * (BK + BTS_PAD)] = tmp.w;
+            // Column-major with padding: BTs[k * BN + n]
+            // We're transposing: B[k][n] → BTs[k][n]
+            BTs[(innerRowB + offset) * BN + innerColB * 4 + 0] = tmp.x;
+            BTs[(innerRowB + offset) * BN + innerColB * 4 + 1] = tmp.y;
+            BTs[(innerRowB + offset) * BN + innerColB * 4 + 2] = tmp.z;
+            BTs[(innerRowB + offset) * BN + innerColB * 4 + 3] = tmp.w;
+        }
         __syncthreads();
 
         // *** MAGIC: Switch on count for compile-time unrolling ***
         // All threads execute same case → warp-uniform!
         switch (count) {
             case 1:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 1, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 1>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 2:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 2, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 2>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 3:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 3, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 3>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 4:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 4, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 4>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 5:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 5, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 5>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 6:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 6, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 6>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 7:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 7, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 7>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;
             case 8:
-                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 8, AS_PAD, BTS_PAD>(
+                compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 8>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, BTs, threadResults);
                 break;

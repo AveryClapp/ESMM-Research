@@ -77,24 +77,24 @@ __device__ void compute_sparse_block_combined(
                 wSubRowIdx * WSUBM + threadRowInWarp * TM];
         }
 
-        // *** SPARSE DIRECT LOADING: Only load non-zero elements ***
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             const uint8_t B_pattern = B_patterns_cache[wSubColIdx];
             const uint baseAddr = (dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
 
-            // Load only elements indicated by pattern bits
-            // Predicated loads - compiler may optimize to predicated instructions
-            if (B_pattern & 0x01) regN[wSubColIdx * TN + 0] = Bs[baseAddr + 0];
-            if (B_pattern & 0x02) regN[wSubColIdx * TN + 1] = Bs[baseAddr + 1];
-            if (B_pattern & 0x04) regN[wSubColIdx * TN + 2] = Bs[baseAddr + 2];
-            if (B_pattern & 0x08) regN[wSubColIdx * TN + 3] = Bs[baseAddr + 3];
-            if (B_pattern & 0x10) regN[wSubColIdx * TN + 4] = Bs[baseAddr + 4];
-            if (B_pattern & 0x20) regN[wSubColIdx * TN + 5] = Bs[baseAddr + 5];
-            if (B_pattern & 0x40) regN[wSubColIdx * TN + 6] = Bs[baseAddr + 6];
-            if (B_pattern & 0x80) regN[wSubColIdx * TN + 7] = Bs[baseAddr + 7];
+            // Vectorized loads with ternary predication (compiler converts to predicated instructions)
+            float4 tmp1 = reinterpret_cast<const float4*>(&Bs[baseAddr + 0])[0];
+            float4 tmp2 = reinterpret_cast<const float4*>(&Bs[baseAddr + 4])[0];
+
+            regN[wSubColIdx * TN + 0] = (B_pattern & 0x01) ? tmp1.x : 0.0f;
+            regN[wSubColIdx * TN + 1] = (B_pattern & 0x02) ? tmp1.y : 0.0f;
+            regN[wSubColIdx * TN + 2] = (B_pattern & 0x04) ? tmp1.z : 0.0f;
+            regN[wSubColIdx * TN + 3] = (B_pattern & 0x08) ? tmp1.w : 0.0f;
+            regN[wSubColIdx * TN + 4] = (B_pattern & 0x10) ? tmp2.x : 0.0f;
+            regN[wSubColIdx * TN + 5] = (B_pattern & 0x20) ? tmp2.y : 0.0f;
+            regN[wSubColIdx * TN + 6] = (B_pattern & 0x40) ? tmp2.z : 0.0f;
+            regN[wSubColIdx * TN + 7] = (B_pattern & 0x80) ? tmp2.w : 0.0f;
         }
 
-        // *** SPARSE DIRECT MULTIPLY: Only compute for non-zero elements ***
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             const float regM_val = regM[wSubRowIdx];
             const int threadResRowBase = wSubRowIdx * (WNITER * TN);
@@ -104,16 +104,15 @@ __device__ void compute_sparse_block_combined(
                 const int regNBase = wSubColIdx * TN;
                 const int threadResBase = threadResRowBase + wSubColIdx * TN;
 
-                // Direct inline multiply for non-zero elements
-                // Each FMA is guarded by the same bit check used during loading
-                if (B_pattern & 0x01) threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
-                if (B_pattern & 0x02) threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
-                if (B_pattern & 0x04) threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
-                if (B_pattern & 0x08) threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
-                if (B_pattern & 0x10) threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
-                if (B_pattern & 0x20) threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];
-                if (B_pattern & 0x40) threadResults[threadResBase + 6] += regM_val * regN[regNBase + 6];
-                if (B_pattern & 0x80) threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
+                // Use unconditional FMAs - zeros from regN make these no-ops
+                threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+                threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
+                threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
+                threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
+                threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
+                threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];
+                threadResults[threadResBase + 6] += regM_val * regN[regNBase + 6];
+                threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
             }
         }
     }

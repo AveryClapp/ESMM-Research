@@ -42,3 +42,5 @@ build/
 # Profiling outputs
 profiles/
 profile.ncu-rep 
+
+CLAUDE.md

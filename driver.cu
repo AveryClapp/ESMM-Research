@@ -141,46 +141,19 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 19: // ESMM B-Transpose
+    case 19: // ESMM Combined A+B Sparsity
+        if (check_results) {
+            res = run_esmm_combined(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+
+    case 20: // ESMM B-Transpose
         if (check_results) {
             res = run_esmm_btranspose(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_btranspose_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 20: // ESMM Dual Sparsity (A+B)
-        if (check_results) {
-            res = run_esmm_dual_sparsity(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_dual_sparsity_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 21: // ESMM Combined A+B Sparsity - Optimized
-        if (check_results) {
-            res = run_esmm_combined_opt(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_combined_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 22: // ESMM B-Transpose with ILP
-        if (check_results) {
-            res = run_esmm_btranspose_ilp(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_btranspose_ilp_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 23: // ESMM Hierarchical Dual Sparsity
-        if (check_results) {
-            res = run_esmm_hierarchical(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_hierarchical_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 24: // ESMM B-Transpose Coalesced + Transpose
-        if (check_results) {
-            res = run_esmm_btranspose_coalesced(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_btranspose_coalesced_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
     default:

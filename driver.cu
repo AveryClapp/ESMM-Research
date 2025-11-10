@@ -141,11 +141,11 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 19: // ESMM Combined A+B Sparsity
+    case 19: // ESMM Combined A+B Sparsity (Optimized)
         if (check_results) {
-            res = run_esmm_combined(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+            res = run_esmm_combined_opt(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
-            res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+            res = run_esmm_combined_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
 
@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11000000";
+    constexpr std::string_view sparsity = "11110000";
 
     // Default values
     std::vector<int> kernel_choices = {13};

@@ -1,0 +1,89 @@
+{
+  "512x512x512": {
+    "best_config": {
+      "NUM_THREADS": 128,
+      "BM": 64,
+      "BN": 64,
+      "BK": 8,
+      "TM": 1,
+      "TN": 8,
+      "WM": 32,
+      "WN": 32,
+      "WNITER": 1,
+      "time": 0.025941333423058193,
+      "times": [
+        0.03276799991726875,
+        0.023552000522613525,
+        0.021503999829292297
+      ],
+      "compile_time": 0,
+      "verification_time": 0,
+      "benchmark_time": 0,
+      "strategy_time": 0,
+      "framework_time": 4.6231609999267675,
+      "timestamp": "2025-11-11 22:41:37.261076+00:00"
+    },
+    "sparse_gflops": 10347.789437893685,
+    "dense_gflops": 10347.789437893685,
+    "sparsity": 0.0,
+    "all_results": null
+  },
+  "1024x1024x1024": {
+    "best_config": {
+      "NUM_THREADS": 128,
+      "BM": 64,
+      "BN": 128,
+      "BK": 8,
+      "TM": 1,
+      "TN": 8,
+      "WM": 64,
+      "WN": 32,
+      "WNITER": 2,
+      "time": 0.042688000947237015,
+      "times": [
+        0.07072000205516815,
+        0.02969600073993206,
+        0.027648000046610832
+      ],
+      "compile_time": 432.55570999997417,
+      "verification_time": 16.194064000046637,
+      "benchmark_time": 0.4746879999402154,
+      "strategy_time": 0,
+      "framework_time": 0,
+      "timestamp": "2025-11-11 22:41:45.593881+00:00"
+    },
+    "sparse_gflops": 50306.49363633403,
+    "dense_gflops": 50306.49363633403,
+    "sparsity": 0.0,
+    "all_results": null
+  },
+  "2048x2048x2048": {
+    "best_config": {
+      "NUM_THREADS": 128,
+      "BM": 64,
+      "BN": 128,
+      "BK": 8,
+      "TM": 1,
+      "TN": 8,
+      "WM": 64,
+      "WN": 32,
+      "WNITER": 2,
+      "time": 0.05529599885145823,
+      "times": [
+        0.08191999793052673,
+        0.04198399931192398,
+        0.04198399931192398
+      ],
+      "compile_time": 428.0527150000353,
+      "verification_time": 82.47197100001813,
+      "benchmark_time": 0.49028900002667797,
+      "strategy_time": 0,
+      "framework_time": 0.439959999880557,
+      "timestamp": "2025-11-11 22:43:02.912046+00:00"
+    },
+    "sparse_gflops": 310689.19163844606,
+    "dense_gflops": 310689.19163844606,
+    "sparsity": 0.0,
+    "all_results": null
+  }
+}

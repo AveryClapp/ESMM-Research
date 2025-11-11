@@ -25,6 +25,10 @@
 #include "../src/kernels/esmm_combined_opt.cu"
 #include "../src/kernels/esmm_hybrid_combined.cu"
 #include "../src/kernels/esmm_btranspose.cu"
+#include "../src/kernels/esmm_offset_combined.cu"
+#include "../src/kernels/esmm_btranspose_offset.cu"
+#include "../src/kernels/esmm_joint_precomputed.cu"
+#include "../src/kernels/esmm_joint_shared.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "preprocess_params.cuh"
@@ -802,18 +806,16 @@ bool run_esmm_pattern_specialized_no_check(int rows, int cols, int inners, float
   return true;
 }
 
-// HYBRID APPROACH (Kernel 20) - Best of K13 + K18
-// ============================================================================
 
 bool run_esmm_hybrid(int rows, int cols, int inners, float *d_A, float *d_B,
                      float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;  // 2× larger
+  const uint BM = 64;  // 2× larger  
   const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -847,17 +849,59 @@ bool run_esmm_hybrid(int rows, int cols, int inners, float *d_A, float *d_B,
   return passed;
 }
 
-bool run_esmm_hybrid_no_check(int rows, int cols, int inners, float *d_A,
-                               float *d_B, float *d_C, int runs) {
+// K25: K17 with larger tiles for better L1 reuse
+bool run_esmm_hybrid_large_no_check(int rows, int cols, int inners, float *d_A,
+                                     float *d_B, float *d_C, int runs) {
   const uint NUM_THREADS = 256;
   const uint BN = 128;
-  const uint BM = 128;
+  const uint BM = 256;  // 2× larger for better data reuse
   const uint BK = 8;
   const uint WN = 64;
   const uint WM = 32;
   const uint WNITER = 4;
   const uint TN = 8;
   const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // GPU-based preprocessing - no host transfer needed!
+  BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  // Time kernel execution separately
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 25 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_block_pattern_metadata(meta);
+  return true;
+}
+
+bool run_esmm_hybrid_no_check(int rows, int cols, int inners, float *d_A,
+                               float *d_B, float *d_C, int runs) {
+  // Tuned configuration from kernel_tuner (2048x2048x2048)
+  // Achieved 310,689 GFLOPS on A10G
+  const uint NUM_THREADS = 128;  // Tuned: was 256
+  const uint BN = 128;            // Same
+  const uint BM = 64;             // Tuned: was 128
+  const uint BK = 8;              // Fixed
+  const uint WN = 32;             // Tuned: was 64
+  const uint WM = 64;             // Tuned: was 32
+  const uint WNITER = 2;          // Tuned: was 4
+  const uint TN = 8;              // Fixed
+  const uint TM = 1;              // Fixed
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
@@ -1165,4 +1209,438 @@ bool run_esmm_combined_opt_no_check(int rows, int cols, int inners, float *d_A,
   free_block_pattern_metadata(A_meta);
   free_b_pattern_metadata(B_meta);
   return true;
+}
+
+bool run_esmm_offset_combined_no_check(int rows, int cols, int inners, float *d_A,
+                                        float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 64;
+  const uint WM = 32;
+  const uint WNITER = 8;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess A matrix for hybrid sparsity
+  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  // Preprocess B matrix for column-level sparsity
+  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
+
+  // Time kernel execution separately
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_offset_combined<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                A_meta.d_blockPatterns, B_meta.d_blockPatterns);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 21 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_block_pattern_metadata(A_meta);
+  free_b_pattern_metadata(B_meta);
+  return true;
+}
+
+bool run_esmm_btranspose_offset(int rows, int cols, int inners, float *d_A,
+                                 float *d_B, float *d_C, float *h_C,
+                                 float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 1;
+  const uint TN = 1;
+  const uint TM = 8;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess A and B sparsity patterns
+  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+  BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
+
+  // Run kernel
+  for (int i = 0; i < runs; i++) {
+    esmm_btranspose_offset<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                A_meta.d_blockPatterns, B_meta.d_blockPatterns);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_block_pattern_metadata(A_meta);
+    free_bt_pattern_metadata(B_meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_block_pattern_metadata(A_meta);
+  free_bt_pattern_metadata(B_meta);
+  return passed;
+}
+
+bool run_esmm_btranspose_offset_no_check(int rows, int cols, int inners, float *d_A,
+                                          float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 1;
+  const uint TN = 1;
+  const uint TM = 8;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess A and B sparsity patterns
+  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+  BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
+
+  // Time kernel execution separately (excluding preprocessing)
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_btranspose_offset<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                A_meta.d_blockPatterns, B_meta.d_blockPatterns);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 22 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_block_pattern_metadata(A_meta);
+  free_bt_pattern_metadata(B_meta);
+  return true;
+}
+
+// ============================================================================
+// Kernel 23: Joint A+B Sparsity with Precomputed Intersections
+// ============================================================================
+
+bool run_esmm_joint_precomputed(int rows, int cols, int inners, float *d_A,
+                                 float *d_B, float *d_C, float *h_C,
+                                 float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 1;
+  const uint TN = 1;
+  const uint TM = 8;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Precompute joint patterns
+  JointPatternMetadata joint_meta = preprocess_joint_patterns(
+      d_A, d_B, rows, cols, inners, BM, BN, BK, WM, WN);
+
+  // Run kernel
+  for (int i = 0; i < runs; i++) {
+    esmm_joint_precomputed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                joint_meta.d_patterns,
+                                joint_meta.numKBlocks,
+                                joint_meta.numMWarps,
+                                joint_meta.numNWarps);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_joint_pattern_metadata(joint_meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_joint_pattern_metadata(joint_meta);
+  return passed;
+}
+
+bool run_esmm_joint_precomputed_no_check(int rows, int cols, int inners, float *d_A,
+                                          float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 1;
+  const uint TN = 1;
+  const uint TM = 8;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Precompute joint patterns
+  JointPatternMetadata joint_meta = preprocess_joint_patterns(
+      d_A, d_B, rows, cols, inners, BM, BN, BK, WM, WN);
+
+  // Time kernel execution separately (excluding preprocessing)
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_joint_precomputed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                joint_meta.d_patterns,
+                                joint_meta.numKBlocks,
+                                joint_meta.numMWarps,
+                                joint_meta.numNWarps);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 23 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_joint_pattern_metadata(joint_meta);
+  return true;
+}
+
+// ============================================================================
+// Kernel 24: Joint A+B with Shared Memory Pattern Cache
+// ============================================================================
+bool run_esmm_joint_shared(int rows, int cols, int inners, float *d_A,
+                                     float *d_B, float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 1;
+  const uint TN = 1;
+  const uint TM = 8;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Precompute joint patterns
+  JointPatternMetadata joint_meta = preprocess_joint_patterns_v2(
+      d_A, d_B, rows, cols, inners, BM, BN, BK, WM, WN);
+
+  // Time kernel execution separately (excluding preprocessing)
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_joint_shared<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                joint_meta.d_patterns,
+                                joint_meta.numKBlocks,
+                                joint_meta.numMWarps,
+                                joint_meta.numNWarps);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 24 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_joint_pattern_metadata(joint_meta);
+  return passed;
+}
+
+bool run_esmm_joint_shared_no_check(int rows, int cols, int inners, float *d_A,
+                                     float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 128;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 1;
+  const uint TN = 1;
+  const uint TM = 8;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Precompute joint patterns
+  JointPatternMetadata joint_meta = preprocess_joint_patterns_v2(
+      d_A, d_B, rows, cols, inners, BM, BN, BK, WM, WN);
+
+  // Time kernel execution separately (excluding preprocessing)
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_joint_shared<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                joint_meta.d_patterns,
+                                joint_meta.numKBlocks,
+                                joint_meta.numMWarps,
+                                joint_meta.numNWarps);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 24 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_joint_pattern_metadata_v2(joint_meta);
+  return true;
+}
+
+bool run_esmm_hybrid_square_no_check(int rows, int cols, int inners, float *d_A,
+                                      float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;  // 2× larger
+  const uint BM = 64;  // 2× larger  
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < runs; i++) {
+    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
+  }
+  cudaDeviceSynchronize();
+  auto end = std::chrono::high_resolution_clock::now();
+
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  double avg_time = elapsed.count() / runs;
+  printf("  Kernel 26 Avg Time: %.3f ms | %.1f GFLOPS\n",
+         avg_time,
+         (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+  free_block_pattern_metadata(meta);
+  return true;
+}
+
+// K25 with verification
+bool run_esmm_hybrid_large(int rows, int cols, int inners, float *d_A,
+                           float *d_B, float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 512;
+  const uint BN = 256;
+  const uint BM = 256;
+  const uint BK = 8;
+  const uint WN = 128;
+  const uint WM = 32;
+  const uint WNITER = 4;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_block_pattern_metadata(meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_block_pattern_metadata(meta);
+  return passed;
+}
+
+// K26 with verification
+bool run_esmm_hybrid_square(int rows, int cols, int inners, float *d_A,
+                            float *d_B, float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;  // 2× larger
+  const uint BM = 64;  // 2× larger  
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  BlockPatternMetadata meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_block_pattern_metadata(meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_block_pattern_metadata(meta);
+  return passed;
 }

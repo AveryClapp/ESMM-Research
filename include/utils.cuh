@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 24; i++) {
+    for (int i = 1; i <= 26; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 24; i++) {
+    for (int i = start; i <= end && i <= 26; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 24) {
+    if (kernel >= 1 && kernel <= 26) {
       kernels.push_back(kernel);
     }
   }
@@ -73,10 +73,12 @@ const char* get_kernel_name(int kernel_choice) {
     case 18: return "ESMM Combined A+B Sparsity";
     case 19: return "ESMM Combined A+B Sparsity - Optimized (3-Phase Block Skipping)";
     case 20: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";
-    case 21: return "ESMM Combined A+B Sparsity - Optimized (Chunk-wise Conditional Loads)";
-    case 22: return "ESMM B-Transpose with ILP (Column-Major Threading)";
-    case 23: return "ESMM Hierarchical Dual Sparsity (Two-Level Pattern Checking)";
-    case 24: return "ESMM B-Transpose Coalesced + Transpose";
+    case 21: return "ESMM A+B Offset Lists (8x8 Templated)";
+    case 22: return "ESMM B-Transpose + 8x8 Offset Templates (Joint K-Sparsity)";
+    case 23: return "ESMM Joint Precomputed (Zero-Overhead Joint A+B Sparsity)";
+    case 24: return "ESMM Joint Shared Memory Pattern Cache";
+    case 25: return "ESMM Block-wise Uniform (Large Tiles BM=256)";
+    case 26: return "ESMM Block-wise Uniform (Square Tiles BM=BN=256)";
     default: return "Unknown Kernel";
   }
 }

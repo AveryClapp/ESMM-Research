@@ -1,0 +1,7 @@
+/home/ec2-user/ESMM-Research/tuning/tuner_k17.py:213: RuntimeWarning: divide by zero encountered in divide
+  sparse_gflops = (2 * nnz_A * N) / (time_s * 1e9)
+Traceback (most recent call last):
+  File "/home/ec2-user/ESMM-Research/tuning/tuner_k17.py", line 214, in tune_single_size
+    dense_gflops = (2 * M * N * K) / (time_s * 1e9)
+                   ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+ZeroDivisionError: float division by zero

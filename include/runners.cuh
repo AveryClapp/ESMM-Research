@@ -1059,7 +1059,7 @@ bool run_esmm_btranspose_no_check(int rows, int cols, int inners, float *d_A,
 
   std::chrono::duration<double, std::milli> elapsed = end - start;
   double avg_time = elapsed.count() / runs;
-  printf("  Kernel 19 Avg Time: %.3f ms | %.1f GFLOPS\n",
+  printf("  Kernel 20 Avg Time: %.3f ms | %.1f GFLOPS\n",
          avg_time,
          (2.0 * rows * cols * inners) / (avg_time * 1e6));
 

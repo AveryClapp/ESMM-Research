@@ -71,8 +71,8 @@ const char* get_kernel_name(int kernel_choice) {
     case 16: return "ESMM Pattern-Specialized (Zero Overhead)";
     case 17: return "ESMM Block-wise Uniform (Per-Warp Pattern Encoding)";
     case 18: return "ESMM Combined A+B Sparsity";
-    case 19: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";
-    case 20: return "ESMM Dual Sparsity (A+B via B-Transpose)";
+    case 19: return "ESMM Combined A+B Sparsity - Optimized (3-Phase Block Skipping)";
+    case 20: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";
     case 21: return "ESMM Combined A+B Sparsity - Optimized (Chunk-wise Conditional Loads)";
     case 22: return "ESMM B-Transpose with ILP (Column-Major Threading)";
     case 23: return "ESMM Hierarchical Dual Sparsity (Two-Level Pattern Checking)";

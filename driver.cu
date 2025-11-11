@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11110000";
+    constexpr std::string_view sparsity = "10000000";  // 87.5% sparsity for testing
 
     // Default values
     std::vector<int> kernel_choices = {13};

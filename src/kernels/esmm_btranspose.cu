@@ -12,7 +12,7 @@
  *
  * Architecture Changes vs Kernel 17:
  *   - Warp tile: 64 rows × 32 columns (was 32×64)
- *   - Thread tile: TM=8, TN=1 (was TM=1, TN=8)
+ *   - Thread tile: TN=8, TM=1 (was TM=1, TN=8)
  *   - B is transposed to B^T (N×K)
  *   - B^T patterns: 8×32 blocks (BK × WN), row-wise encoding
  *
@@ -59,19 +59,15 @@ __device__ void compute_sparse_block_btranspose(
     float regM[WMITER * TM];
     float regN[WNITER * TN];
 
-    // Manually unroll everything like K17 for maximum ILP
     #pragma unroll
     for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
         const uint8_t dotIdx = offsets[sparse_idx];
 
-        // Load A values - manually unrolled for TM=8
-        // Pre-compute base address
         const uint mBase = warpRow * WM + threadRowInWarp * TM;
 
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             const uint mOffset = mBase + wSubRowIdx * WSUBM;
-            // Column-major: As[k * BM + m] - consecutive loads!
             const uint baseAddr = dotIdx * BM + mOffset;
             regM[wSubRowIdx * TM + 0] = As[baseAddr + 0];
             regM[wSubRowIdx * TM + 1] = As[baseAddr + 1];
@@ -83,8 +79,6 @@ __device__ void compute_sparse_block_btranspose(
             regM[wSubRowIdx * TM + 7] = As[baseAddr + 7];
         }
 
-        // Load B value - use pointer arithmetic instead of multiply
-        // Pre-compute base pointer for this k-slice
         const float* BTs_row = &BTs[dotIdx * BN];
         #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
@@ -92,7 +86,6 @@ __device__ void compute_sparse_block_btranspose(
             regN[wSubColIdx * TN] = BTs_row[localCol];
         }
 
-        // Compute outer product: 8 A values * 1 B value - manually unrolled
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             #pragma unroll
@@ -100,7 +93,6 @@ __device__ void compute_sparse_block_btranspose(
                 const float b_val = regN[wSubColIdx * TN];
                 const int resBase = wSubRowIdx * TM * (WNITER * TN) + wSubColIdx * TN;
 
-                // 8 independent multiply-accumulates for ILP
                 threadResults[resBase + 0 * (WNITER * TN)] += regM[wSubRowIdx * TM + 0] * b_val;
                 threadResults[resBase + 1 * (WNITER * TN)] += regM[wSubRowIdx * TM + 1] * b_val;
                 threadResults[resBase + 2 * (WNITER * TN)] += regM[wSubRowIdx * TM + 2] * b_val;
@@ -113,10 +105,6 @@ __device__ void compute_sparse_block_btranspose(
         }
     }
 }
-
-// ============================================================================
-// Main kernel: B^T sparsity with warp-uniform pattern checks
-// ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
           const int WNITER, const int TM, const int TN, const int NUM_THREADS>
@@ -141,28 +129,23 @@ __global__ void __launch_bounds__(NUM_THREADS)
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    // Use column-major layout with padding to avoid bank conflicts
-    __shared__ float As[(BK + 1) * BM];  // Column-major: [BK × BM] with padding
-    __shared__ float BTs[BK * BN];  // Column-major: [BK × BN] - remove padding to simplify addressing
+    __shared__ float As[(BK + 1) * BM];
+    __shared__ float BTs[BK * BN];
 
     A += cRow * BM * K;
-    B += cCol * BN;  // B is K×N, offset by columns
+    B += cCol * BN;
     C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
 
     const uint innerRowA = threadIdx.x / (BK / 4);
     const uint innerColA = threadIdx.x % (BK / 4);
     constexpr uint rowStrideA = (NUM_THREADS * 4) / BK;
 
-    // For B (K×N): distribute threads for coalesced loads
-    // Want consecutive threads to load consecutive memory locations
-    // B[k*N + n] - consecutive in N dimension
-    const uint innerRowB = threadIdx.x / (BN / 4);  // Which K-row (thread 0-31 → k=0, 32-63 → k=1, etc.)
-    const uint innerColB = threadIdx.x % (BN / 4);  // Which N-column group (0-31)
-    constexpr uint rowStrideB = (NUM_THREADS * 4) / BN;  // How many K-rows per iteration
+    const uint innerRowB = threadIdx.x / (BN / 4);
+    const uint innerColB = threadIdx.x % (BN / 4);
+    constexpr uint rowStrideB = (NUM_THREADS * 4) / BN;
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-    // Calculate global column block for B^T pattern lookup
     const uint globalColBlock = cCol * (BN / WN) + warpCol;
 
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
@@ -177,7 +160,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
         if (count == 0) {
             A += BK;
-            B += BK * N;  // B is K×N, advance by BK rows
+            B += BK * N;
             continue;
         }
 
@@ -196,8 +179,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
             const float4 tmp = reinterpret_cast<const float4 *>(
                 &B[(innerRowB + offset) * N + innerColB * 4])[0];
 
-            // Column-major with padding: BTs[k * BN + n]
-            // We're transposing: B[k][n] → BTs[k][n]
             BTs[(innerRowB + offset) * BN + innerColB * 4 + 0] = tmp.x;
             BTs[(innerRowB + offset) * BN + innerColB * 4 + 1] = tmp.y;
             BTs[(innerRowB + offset) * BN + innerColB * 4 + 2] = tmp.z;
@@ -205,8 +186,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
         }
         __syncthreads();
 
-        // *** MAGIC: Switch on count for compile-time unrolling ***
-        // All threads execute same case → warp-uniform!
         switch (count) {
             case 1:
                 compute_sparse_block_btranspose<BM, BN, BK, WM, WN, WNITER, TM, TN, 1>(

@@ -163,7 +163,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11111100";
+    constexpr std::string_view sparsity = "10000000";
 
     // Default values
     std::vector<int> kernel_choices = {13};
@@ -215,8 +215,10 @@ int main(int argc, char *argv[]) {
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
 
+    // A: K-dimension sparsity (rows) - for skipping K-blocks
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-    randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
+    // B: K-dimension sparsity (rows) - allows block-level skipping
+    randomize_matrix_B_kdim_pattern(h_B, inners, cols, sparsity);
     memset(h_C, 0, rows * cols * sizeof(float));
 
     float *d_A, *d_B, *d_C;

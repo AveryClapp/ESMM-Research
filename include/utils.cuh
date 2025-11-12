@@ -164,6 +164,26 @@ void randomize_matrix_with_pattern(float *mat, int M, int N,
   }
 }
 
+// Generate sparsity along K-dimension (rows) for B matrix
+// This allows skipping entire K-blocks when rows are zero
+void randomize_matrix_B_kdim_pattern(float *mat, int K, int N,
+    std::string_view pattern) {
+  for (int k = 0; k < K; k++) {
+    int pattern_idx = k % PATTERN_LENGTH;  // Pattern along K (rows)
+    bool row_is_zero = (pattern[pattern_idx] == '0');
+
+    for (int n = 0; n < N; n++) {
+      if (row_is_zero) {
+        mat[k * N + n] = 0.0f;  // Entire row zero
+      } else {
+        float tmp = (float)(rand() % 5) + 0.01 * (rand() % 5);
+        tmp = (rand() % 2 == 0) ? tmp : tmp * (-1.);
+        mat[k * N + n] = tmp;
+      }
+    }
+  }
+}
+
 void randomize_matrix(float *mat, int M, int N) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {

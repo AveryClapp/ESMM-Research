@@ -32,8 +32,6 @@
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"
 #include "../../include/pattern_lut.cuh"
-#include "../../include/unrolled_inners.cuh"
-#include "../../include/b_pattern_dispatch.cuh"
 #include "../preprocessors/a_preprocessor_hybrid.cu"
 #include "../preprocessors/b_preprocessor_hybrid.cu"
 #include <cuda_runtime.h>

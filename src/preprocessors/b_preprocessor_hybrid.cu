@@ -37,19 +37,14 @@ __global__ void preprocess_b_patterns(
     const int warpId = threadIdx.x / WARP_SIZE;
     const int laneId = threadIdx.x % WARP_SIZE;
 
-    // Each block processes one K-block, each warp processes different N-blocks
     const int kBlock = blockIdx.x;
     if (kBlock >= numKBlocks) return;
 
     const int globalKBase = kBlock * BK;
 
-    // Process N-blocks, with each warp handling WARPS_PER_BLOCK blocks at a time
     for (int nBlockBase = warpId; nBlockBase < numNBlocks; nBlockBase += WARPS_PER_BLOCK) {
         uint8_t threadPattern = 0;
 
-        // Each thread processes a subset of (K,N) elements
-        // Distribute BK * TN work across 32 threads
-        // Each thread handles: (BK * TN) / 32 = 2 elements (for BK=8, TN=8)
         constexpr int ELEMENTS_PER_WARP = BK * TN;
         constexpr int ELEMENTS_PER_THREAD = (ELEMENTS_PER_WARP + WARP_SIZE - 1) / WARP_SIZE;
 
@@ -72,7 +67,6 @@ __global__ void preprocess_b_patterns(
             }
         }
 
-        // Warp-level reduction: OR all thread patterns together
         uint8_t blockPattern = threadPattern;
 
         #pragma unroll
@@ -80,7 +74,6 @@ __global__ void preprocess_b_patterns(
             blockPattern |= __shfl_xor_sync(0xFFFFFFFF, blockPattern, offset);
         }
 
-        // First thread of warp writes result
         if (laneId == 0) {
             const int outIdx = kBlock * numNBlocks + nBlockBase;
             blockPatterns[outIdx] = blockPattern;
@@ -88,9 +81,6 @@ __global__ void preprocess_b_patterns(
     }
 }
 
-/*
- * GPU-based preprocessing for B-matrix patterns
- */
 BMatrixPatternMetadata analyze_b_sparsity_pattern_gpu(float* d_B, int K, int N, int BK, int TN) {
     BMatrixPatternMetadata meta;
     meta.numKBlocks = K / BK;

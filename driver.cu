@@ -148,6 +148,10 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_btranspose_joint_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 20:
+        if (check_results) {
+            res = run_esmm_joint_precomputed(
+        }
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;

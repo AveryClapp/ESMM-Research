@@ -23,7 +23,9 @@
 #include "../src/kernels/esmm_hybrid.cu"
 #include "../src/kernels/esmm_combined_opt.cu"
 #include "../src/kernels/esmm_btranspose.cu"
+#include "../src/kernels/esmm_joint_precomputed.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
+#include "../src/preprocessors/joint_preprocessor.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "preprocess_params.cuh"
 #include <chrono>
@@ -1104,3 +1106,132 @@ bool run_esmm_btranspose_joint_no_check(int rows, int cols, int inners, float *d
   free_bt_pattern_metadata(B_meta);
   return true;
 }
+
+
+// Example Runner for Joint Precomputed Kernel
+bool run_esmm_joint_precomputed(int rows, int cols, int inners, 
+                                 float *d_A, float *d_B, float *d_C, 
+                                 float *h_C, float *h_C_ref, int runs) {
+    // K17 optimal configuration
+    const uint NUM_THREADS = 128;
+    const uint BM = 64;
+    const uint BN = 128;
+    const uint BK = 8;
+    const uint WM = 64;
+    const uint WN = 32;
+    const uint WNITER = 2;
+    const uint TM = 1;
+    const uint TN = 8;
+
+    dim3 blockDim(NUM_THREADS);
+    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+    // Step 1: Preprocess A patterns (existing)
+    APatternMetadata A_meta = preprocess_a_blockwise(d_A, rows, inners, WM, BK);
+
+    // Step 2: Preprocess B patterns (existing)
+    BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
+
+    // Step 3: Compute joint patterns (NEW!)
+    printf("Computing joint patterns...\n");
+    JointPatternMetadata joint_meta = preprocess_joint_patterns(
+        A_meta.d_blockPatterns,
+        B_meta.d_blockPatterns,
+        rows, cols, inners, WM, WN, BK);
+
+    // Step 4: Run kernel with precomputed joint patterns
+    for (int i = 0; i < runs; i++) {
+        esmm_joint_precomputed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+            <<<gridDim, blockDim>>>(
+                rows, cols, inners, d_A, d_B, d_C,
+                joint_meta.d_jointPatterns,
+                joint_meta.numKBlocks,
+                joint_meta.numNBlocks);
+    }
+
+    cudaDeviceSynchronize();
+
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(error));
+        free_a_pattern_metadata(A_meta);
+        free_bt_pattern_metadata(B_meta);
+        free_joint_pattern_metadata(joint_meta);
+        return false;
+    }
+
+    // Verify results
+    cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+    bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+    // Cleanup
+    free_a_pattern_metadata(A_meta);
+    free_bt_pattern_metadata(B_meta);
+    free_joint_pattern_metadata(joint_meta);
+
+    return passed;
+}
+
+// For benchmarking (no verification)
+bool run_esmm_joint_precomputed_no_check(int rows, int cols, int inners,
+                                          float *d_A, float *d_B, float *d_C, 
+                                          int runs) {
+    const uint NUM_THREADS = 128;
+    const uint BM = 64;
+    const uint BN = 128;
+    const uint BK = 8;
+    const uint WM = 64;
+    const uint WN = 32;
+    const uint WNITER = 2;
+    const uint TM = 1;
+    const uint TN = 8;
+
+    dim3 blockDim(NUM_THREADS);
+    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+    // Preprocessing (done once)
+    APatternMetadata A_meta = preprocess_a_blockwise(d_A, rows, inners, WM, BK);
+    BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
+    JointPatternMetadata joint_meta = preprocess_joint_patterns(
+        A_meta.d_blockPatterns, B_meta.d_blockPatterns,
+        rows, cols, inners, WM, WN, BK);
+
+    // Time kernel execution (excluding preprocessing)
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    for (int i = 0; i < runs; i++) {
+        esmm_joint_precomputed<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+            <<<gridDim, blockDim>>>(
+                rows, cols, inners, d_A, d_B, d_C,
+                joint_meta.d_jointPatterns,
+                joint_meta.numKBlocks,
+                joint_meta.numNBlocks);
+    }
+    
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    double avg_time = elapsed.count() / runs;
+
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(error));
+        free_a_pattern_metadata(A_meta);
+        free_bt_pattern_metadata(B_meta);
+        free_joint_pattern_metadata(joint_meta);
+        return false;
+    }
+
+    printf("Average kernel time: %.3f ms\n", avg_time);
+
+    // Cleanup
+    free_a_pattern_metadata(A_meta);
+    free_bt_pattern_metadata(B_meta);
+    free_joint_pattern_metadata(joint_meta);
+
+    return true;
+}
+

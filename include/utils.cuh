@@ -71,7 +71,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 16: return "ESMM Pattern-Specialized (Zero Overhead)";
     case 17: return "ESMM Block-wise Uniform (Per-Warp Pattern Encoding)";
     case 18: return "ESMM Combined A+B Sparsity";
-    case 19: return "ESMM Combined A+B Sparsity - Optimized (3-Phase Block Skipping)";
+    case 19: return "ESMM Joint A+B Sparsity (B-Transpose + Intersection)";
     case 20: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";
     case 21: return "ESMM A+B Offset Lists (8x8 Templated)";
     case 22: return "ESMM B-Transpose + 8x8 Offset Templates (Joint K-Sparsity)";
@@ -192,6 +192,138 @@ void randomize_matrix(float *mat, int M, int N) {
       mat[i * N + j] = tmp;
     }
   }
+}
+
+// ============================================================================
+// UNSTRUCTURED RANDOM SPARSITY GENERATION
+// ============================================================================
+
+/*
+ * Generate matrix with completely random unstructured sparsity
+ *
+ * Each element has an independent probability of being zero.
+ * No repeating patterns - truly random sparsity distribution.
+ *
+ * Parameters:
+ *   mat: Output matrix (M×N)
+ *   M, N: Matrix dimensions
+ *   sparsity_percent: Target sparsity percentage (0-100)
+ *                     50.0 = 50% of elements are zero
+ *   seed: Random seed for reproducibility (optional, 0 = use time)
+ */
+void randomize_matrix_unstructured(float *mat, int M, int N,
+                                   float sparsity_percent,
+                                   unsigned int seed = 0) {
+  // Set random seed for reproducibility
+  if (seed != 0) {
+    srand(seed);
+  }
+
+  const float sparsity_threshold = sparsity_percent / 100.0f;
+  int zero_count = 0;
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      // Random probability for each element
+      float prob = (float)rand() / (float)RAND_MAX;
+
+      if (prob < sparsity_threshold) {
+        // Element is zero (sparse)
+        mat[i * N + j] = 0.0f;
+        zero_count++;
+      } else {
+        // Element is non-zero (dense)
+        float tmp = (float)(rand() % 5) + 0.01 * (rand() % 5);
+        tmp = (rand() % 2 == 0) ? tmp : tmp * (-1.);
+        mat[i * N + j] = tmp;
+      }
+    }
+  }
+
+  // Print actual sparsity achieved
+  float actual_sparsity = 100.0f * zero_count / (M * N);
+  if (fabs(actual_sparsity - sparsity_percent) > 2.0f) {
+    printf("  Note: Requested %.1f%% sparsity, achieved %.2f%% (%d/%d zeros)\n",
+           sparsity_percent, actual_sparsity, zero_count, M * N);
+  }
+}
+
+/*
+ * Generate A matrix with unstructured random sparsity in K-dimension
+ *
+ * For A (M×K): Each element has independent probability of being zero.
+ * Good for testing joint sparsity with random patterns.
+ *
+ * Parameters:
+ *   mat: Output matrix (M×K)
+ *   M, K: Matrix dimensions
+ *   sparsity_percent: Target sparsity percentage (0-100)
+ *   seed: Random seed for reproducibility
+ */
+void randomize_matrix_A_unstructured(float *mat, int M, int K,
+                                     float sparsity_percent,
+                                     unsigned int seed = 0) {
+  randomize_matrix_unstructured(mat, M, K, sparsity_percent, seed);
+  printf("Generated A (M×K) with %.1f%% unstructured sparsity\n", sparsity_percent);
+}
+
+/*
+ * Generate B matrix with unstructured random sparsity in K-dimension
+ *
+ * For B (K×N): Each element has independent probability of being zero.
+ * K-dimension sparsity allows joint sparsity exploitation with A.
+ *
+ * Parameters:
+ *   mat: Output matrix (K×N)
+ *   K, N: Matrix dimensions
+ *   sparsity_percent: Target sparsity percentage (0-100)
+ *   seed: Random seed for reproducibility
+ */
+void randomize_matrix_B_unstructured(float *mat, int K, int N,
+                                     float sparsity_percent,
+                                     unsigned int seed = 0) {
+  randomize_matrix_unstructured(mat, K, N, sparsity_percent, seed);
+  printf("Generated B (K×N) with %.1f%% unstructured sparsity\n", sparsity_percent);
+}
+
+/*
+ * Generate BOTH A and B with independent unstructured random sparsity
+ *
+ * Creates truly random sparsity patterns for joint A+B testing.
+ * Each matrix gets independent random sparsity.
+ *
+ * Expected joint density: (1-sparsity_A) × (1-sparsity_B)
+ * Example: 50% × 50% = 25% joint density → 75% joint sparsity
+ *
+ * Parameters:
+ *   mat_A: Output A matrix (M×K)
+ *   mat_B: Output B matrix (K×N)
+ *   M, N, K: Matrix dimensions
+ *   sparsity_A: Target sparsity for A (0-100)
+ *   sparsity_B: Target sparsity for B (0-100)
+ *   seed: Random seed for reproducibility
+ */
+void randomize_matrices_joint_unstructured(float *mat_A, float *mat_B,
+                                           int M, int N, int K,
+                                           float sparsity_A,
+                                           float sparsity_B,
+                                           unsigned int seed = 0) {
+  printf("Generating unstructured random sparsity:\n");
+
+  // Generate A with independent random sparsity
+  randomize_matrix_A_unstructured(mat_A, M, K, sparsity_A, seed);
+
+  // Generate B with independent random sparsity (different seed)
+  randomize_matrix_B_unstructured(mat_B, K, N, sparsity_B, seed ? seed + 1 : 0);
+
+  // Calculate expected joint sparsity
+  float density_A = (100.0f - sparsity_A) / 100.0f;
+  float density_B = (100.0f - sparsity_B) / 100.0f;
+  float joint_density = density_A * density_B;
+  float joint_sparsity = 100.0f * (1.0f - joint_density);
+
+  printf("Expected joint sparsity: %.1f%% × %.1f%% = %.2f%% joint density (%.2f%% joint sparsity)\n",
+         sparsity_A, sparsity_B, joint_density * 100.0f, joint_sparsity);
 }
 
 std::vector<int> stringToVector(const std::string &str) {

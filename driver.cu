@@ -141,6 +141,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_btranspose_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 19: // ESMM Joint A+B Sparsity (B-Transpose + Intersection)
+        if (check_results) {
+            res = run_esmm_btranspose_joint(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_btranspose_joint_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -163,7 +170,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "10000000";
+    constexpr std::string_view sparsity = "11110000";
 
     // Default values
     std::vector<int> kernel_choices = {13};
@@ -218,7 +225,7 @@ int main(int argc, char *argv[]) {
     // A: K-dimension sparsity (rows) - for skipping K-blocks
     randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
     // B: K-dimension sparsity (rows) - allows block-level skipping
-    randomize_matrix_B_kdim_pattern(h_B, inners, cols, sparsity);
+    randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
     memset(h_C, 0, rows * cols * sizeof(float));
 
     float *d_A, *d_B, *d_C;

@@ -120,78 +120,25 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         }
         res = true; // Assume cuBLAS always succeeds
         break;
-    case 16: // ESMM Pattern-Specialized (Zero Overhead)
-        if (check_results) {
-            res = run_esmm_pattern_specialized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_pattern_specialized_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 17: // ESMM Block-wise Uniform (Per-Warp Pattern Encoding)
+    case 16: // ESMM Block-wise Uniform (Per-Warp Pattern Encoding)
         if (check_results) {
             res = run_esmm_hybrid(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_hybrid_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 18: // ESMM Combined A+B Sparsity
-        if (check_results) {
-            res = run_esmm_combined(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 19: // ESMM Combined A+B Sparsity (Optimized)
+    case 17: // ESMM Combined A+B Sparsity (Optimized)
         if (check_results) {
             res = run_esmm_combined_opt(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_combined_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-
-    case 20: // ESMM B-Transpose
+    case 18: // ESMM B-Transpose
         if (check_results) {
             res = run_esmm_btranspose(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_btranspose_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 21: // ESMM A+B Offset Lists (8x8 Templated)
-        res = run_esmm_offset_combined_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        break;
-    case 22: // ESMM B-Transpose + 8x8 Offset Templates
-        if (check_results) {
-            res = run_esmm_btranspose_offset(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_btranspose_offset_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 23: // ESMM Joint Precomputed
-        if (check_results) {
-            res = run_esmm_joint_precomputed(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_joint_precomputed_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 24: // ESMM Joint Shared
-        if (check_results) {
-            res = run_esmm_joint_shared(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_joint_shared_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 25: // K17 with larger tiles
-        if (check_results) {
-            res = run_esmm_hybrid_large(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref,runs);
-        } else {
-            res = run_esmm_hybrid_large_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 26: // K17 with square large tiles
-        if (check_results) {
-            res = run_esmm_hybrid_square(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_hybrid_square_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
     default:
@@ -216,7 +163,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11110000";  // 87.5% sparsity for testing
+    constexpr std::string_view sparsity = "11111100";
 
     // Default values
     std::vector<int> kernel_choices = {13};

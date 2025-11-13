@@ -14,39 +14,45 @@
 
 /*
  * Compute Joint Pattern: A ∩ B
- * 
+ *
  * For each (M-block, N-block, K-block), compute:
  *   joint_pattern = A_pattern & B_pattern  (bitwise AND)
- * 
+ *
  * This gives us the K-indices where BOTH A and B are non-zero.
+ *
+ * MEMORY LAYOUT: K-MAJOR for better cache locality
+ *   joint_patterns[kBlock][mBlock][nBlock]
+ *   All warps processing same K-iteration access consecutive memory!
  */
 __global__ void compute_joint_patterns_kernel(
     const uint8_t* __restrict__ a_patterns,  // [numMBlocks × numKBlocks]
     const uint8_t* __restrict__ b_patterns,  // [numNBlocks × numKBlocks]
-    uint8_t* __restrict__ joint_patterns,     // [numMBlocks × numNBlocks × numKBlocks]
+    uint8_t* __restrict__ joint_patterns,     // [numKBlocks × numMBlocks × numNBlocks] (K-MAJOR!)
     int numMBlocks, int numNBlocks, int numKBlocks) {
-    
+
     // 3D grid: (M-blocks, N-blocks, K-blocks)
     const int mBlock = blockIdx.x;
     const int nBlock = blockIdx.y;
     const int kBlock = blockIdx.z * blockDim.x + threadIdx.x;
-    
+
     if (mBlock >= numMBlocks || nBlock >= numNBlocks || kBlock >= numKBlocks) return;
-    
+
     // Read A and B patterns
     const uint8_t a_pat = a_patterns[mBlock * numKBlocks + kBlock];
     const uint8_t b_pat = b_patterns[nBlock * numKBlocks + kBlock];
-    
+
     // Bitwise AND to get intersection
     const uint8_t joint_pat = a_pat & b_pat;
-    
-    // Store joint pattern
-    const int outIdx = (mBlock * numNBlocks + nBlock) * numKBlocks + kBlock;
+
+    // Store joint pattern in K-MAJOR layout
+    // OLD: (mBlock * numNBlocks + nBlock) * numKBlocks + kBlock  (M-major)
+    // NEW: kBlock * numMBlocks * numNBlocks + mBlock * numNBlocks + nBlock  (K-major)
+    const int outIdx = kBlock * numMBlocks * numNBlocks + mBlock * numNBlocks + nBlock;
     joint_patterns[outIdx] = joint_pat;
 }
 
 struct JointPatternMetadata {
-    uint8_t* d_jointPatterns;  // [numMBlocks × numNBlocks × numKBlocks]
+    uint8_t* d_jointPatterns;  // [numKBlocks × numMBlocks × numNBlocks] (K-MAJOR!)
     int numMBlocks;
     int numNBlocks;
     int numKBlocks;

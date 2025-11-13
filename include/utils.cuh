@@ -100,13 +100,19 @@ void print_usage(const char* program_name) {
   cout << "    --verbose, -v: Enable verbose output" << endl;
   cout << "    --no-check, -n: Skip result verification (performance-only mode)" << endl;
   cout << "    --check-results, -c: Enable result verification (default)" << endl;
+  cout << "    --random, -r: Use random unstructured sparsity (default: pattern-based)" << endl;
   cout << "    --help, -h: Show this help message" << endl;
+  cout << endl;
+  cout << "Sparsity Modes:" << endl;
+  cout << "  Pattern-based (default): Uses repeating pattern \"11110000\" (50% sparsity)" << endl;
+  cout << "  Random (--random, -r): Uses truly random unstructured sparsity (50% default)" << endl;
   cout << endl;
   cout << "Examples:" << endl;
   cout << "  " << program_name << " 6 10 --verbose --no-check" << endl;
   cout << "  " << program_name << " 1-5 1 --check-results" << endl;
   cout << "  " << program_name << " all 1 -v -n" << endl;
-  cout << "  " << program_name << " 19 1 --verbose  # Test cuSPARSE kernel" << endl;
+  cout << "  " << program_name << " 13 1 --random --verbose  # Test with random sparsity" << endl;
+  cout << "  " << program_name << " 10 5 -r -v  # Short form with random sparsity" << endl;
 }
 
 

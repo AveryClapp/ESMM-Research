@@ -148,10 +148,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_btranspose_joint_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 20:
+    case 20: // ESMM Joint A+B Sparsity (Precomputed Patterns)
         if (check_results) {
-            res = run_esmm_joint_precomputed(
+            res = run_esmm_joint_precomputed(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_joint_precomputed_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -181,6 +184,10 @@ int main(int argc, char *argv[]) {
     int runs = 1;
     bool verbose = false;
     bool check_results = true;
+    bool use_random_sparsity = false;
+    float random_sparsity_percent = 37.5f;
+    unsigned int random_seed = 12345;
+
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
@@ -190,6 +197,8 @@ int main(int argc, char *argv[]) {
             verbose = true;
         } else if (arg == "--no-check" || arg == "-n") {
             check_results = false;
+        } else if (arg == "--random" || arg == "-r") {
+            use_random_sparsity = true;
         } else if (i == 1) {
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
                 kernel_choices = parse_kernel_selection(arg);
@@ -212,6 +221,13 @@ int main(int argc, char *argv[]) {
         cout << "Matrix dimensions: " << rows << "x" << cols << " * " << cols << "x" << inners << endl;
         cout << "Number of runs per kernel: " << runs << endl;
         cout << "Result checking: " << (check_results ? "ENABLED" : "DISABLED") << endl;
+        cout << "Sparsity mode: " << (use_random_sparsity ? "RANDOM" : "PATTERN-BASED") << endl;
+        if (use_random_sparsity) {
+            cout << "  Random sparsity: " << random_sparsity_percent << "%" << endl;
+            cout << "  Random seed: " << random_seed << endl;
+        } else {
+            cout << "  Pattern: " << sparsity << endl;
+        }
         cout << "Kernels to run: ";
         for (size_t i = 0; i < kernel_choices.size(); i++) {
             cout << kernel_choices[i];
@@ -226,10 +242,18 @@ int main(int argc, char *argv[]) {
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
 
-    // A: K-dimension sparsity (rows) - for skipping K-blocks
-    randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-    // B: K-dimension sparsity (rows) - allows block-level skipping
-    randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
+    // Generate matrices based on sparsity mode
+    if (use_random_sparsity) {
+        // Random unstructured sparsity
+        randomize_matrix_unstructured(h_A, rows, inners, random_sparsity_percent, random_seed);
+        randomize_matrix_unstructured(h_B, inners, cols, random_sparsity_percent, random_seed + 1);
+    } else {
+        // Pattern-based sparsity
+        // A: K-dimension sparsity (rows) - for skipping K-blocks
+        randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
+        // B: K-dimension sparsity (rows) - allows block-level skipping
+        randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
+    }
     memset(h_C, 0, rows * cols * sizeof(float));
 
     float *d_A, *d_B, *d_C;

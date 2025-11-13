@@ -145,8 +145,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
         // ====================================================================
         // SINGLE LOOKUP: Precomputed joint pattern (A ∩ B)
+        // K-MAJOR LAYOUT: All warps in same K-iteration access consecutive memory!
         // ====================================================================
-        const uint patternIdx = (globalWarpRow * numNBlocks + globalColBlock) * numKBlocks + kBlock;
+        // OLD (M-major): (globalWarpRow * numNBlocks + globalColBlock) * numKBlocks + kBlock
+        // NEW (K-major): kBlock * numMBlocks * numNBlocks + globalWarpRow * numNBlocks + globalColBlock
+        const uint numMBlocks = M / WM;  // Total M-warps in matrix
+        const uint patternIdx = kBlock * numMBlocks * numNBlocks + globalWarpRow * numNBlocks + globalColBlock;
         const uint8_t joint_pattern = jointPatterns[patternIdx];
         const uint8_t count = PATTERN_LUT_BK8[joint_pattern].count;
         const uint8_t* offsets = PATTERN_LUT_BK8[joint_pattern].offsets;

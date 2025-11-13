@@ -1128,7 +1128,7 @@ bool run_esmm_joint_precomputed(int rows, int cols, int inners,
     cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
     // Step 1: Preprocess A patterns (existing)
-    APatternMetadata A_meta = preprocess_a_blockwise(d_A, rows, inners, WM, BK);
+    BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
 
     // Step 2: Preprocess B patterns (existing)
     BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
@@ -1155,7 +1155,7 @@ bool run_esmm_joint_precomputed(int rows, int cols, int inners,
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
         printf("CUDA error: %s\n", cudaGetErrorString(error));
-        free_a_pattern_metadata(A_meta);
+        free_block_pattern_metadata(A_meta);
         free_bt_pattern_metadata(B_meta);
         free_joint_pattern_metadata(joint_meta);
         return false;
@@ -1166,7 +1166,7 @@ bool run_esmm_joint_precomputed(int rows, int cols, int inners,
     bool passed = verifyResults(h_C, h_C_ref, rows * cols);
 
     // Cleanup
-    free_a_pattern_metadata(A_meta);
+    free_block_pattern_metadata(A_meta);
     free_bt_pattern_metadata(B_meta);
     free_joint_pattern_metadata(joint_meta);
 
@@ -1192,7 +1192,7 @@ bool run_esmm_joint_precomputed_no_check(int rows, int cols, int inners,
     cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
     // Preprocessing (done once)
-    APatternMetadata A_meta = preprocess_a_blockwise(d_A, rows, inners, WM, BK);
+    BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
     BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
     JointPatternMetadata joint_meta = preprocess_joint_patterns(
         A_meta.d_blockPatterns, B_meta.d_blockPatterns,
@@ -1219,7 +1219,7 @@ bool run_esmm_joint_precomputed_no_check(int rows, int cols, int inners,
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
         printf("CUDA error: %s\n", cudaGetErrorString(error));
-        free_a_pattern_metadata(A_meta);
+        free_block_pattern_metadata(A_meta);
         free_bt_pattern_metadata(B_meta);
         free_joint_pattern_metadata(joint_meta);
         return false;
@@ -1228,7 +1228,7 @@ bool run_esmm_joint_precomputed_no_check(int rows, int cols, int inners,
     printf("Average kernel time: %.3f ms\n", avg_time);
 
     // Cleanup
-    free_a_pattern_metadata(A_meta);
+    free_block_pattern_metadata(A_meta);
     free_bt_pattern_metadata(B_meta);
     free_joint_pattern_metadata(joint_meta);
 

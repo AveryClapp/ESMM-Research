@@ -127,13 +127,6 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_hybrid_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 17: // ESMM Combined A+B Sparsity (Optimized)
-        if (check_results) {
-            res = run_esmm_combined_opt(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_combined_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
     case 18: // ESMM B-Transpose
         if (check_results) {
             res = run_esmm_btranspose(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
@@ -153,6 +146,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_joint_precomputed(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_joint_precomputed_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 21: // ESMM Joint A+B Sparsity (1D Dispatch - Simplified)
+        if (check_results) {
+            res = run_esmm_joint_1d(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_joint_1d_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
     default:

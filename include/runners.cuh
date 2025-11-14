@@ -21,9 +21,9 @@
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_2.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_1.cu"
 #include "../src/kernels/esmm_hybrid.cu"
-#include "../src/kernels/esmm_combined_opt.cu"
 #include "../src/kernels/esmm_btranspose.cu"
 #include "../src/kernels/esmm_joint_precomputed.cu"
+#include "../src/kernels/esmm_joint_1d.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
 #include "../src/preprocessors/joint_preprocessor.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
@@ -917,98 +917,6 @@ bool run_esmm_btranspose_no_check(int rows, int cols, int inners, float *d_A,
   return true;
 }
 
-bool run_esmm_combined_opt(int rows, int cols, int inners, float *d_A, float *d_B,
-                            float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Preprocess A matrix for row-level sparsity
-  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
-
-  // Preprocess B matrix for column-level sparsity
-  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
-
-  // Run optimized combined kernel
-  for (int i = 0; i < runs; i++) {
-    esmm_combined_blockwise_opt<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
-                                A_meta.d_blockPatterns, B_meta.d_blockPatterns,
-                                A_meta.numKBlocks, B_meta.numNBlocks);
-  }
-
-  cudaDeviceSynchronize();
-
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    printf("CUDA error: %s\n", cudaGetErrorString(error));
-    free_block_pattern_metadata(A_meta);
-    free_b_pattern_metadata(B_meta);
-    return false;
-  }
-
-  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
-  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
-
-  free_block_pattern_metadata(A_meta);
-  free_b_pattern_metadata(B_meta);
-  return passed;
-}
-
-bool run_esmm_combined_opt_no_check(int rows, int cols, int inners, float *d_A,
-                                     float *d_B, float *d_C, int runs) {
-  const uint NUM_THREADS = 256;
-  const uint BN = 128;
-  const uint BM = 128;
-  const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
-  const uint TN = 8;
-  const uint TM = 1;
-
-  dim3 blockDim(NUM_THREADS);
-  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
-  cudaMemset(d_C, 0, rows * cols * sizeof(float));
-
-  // Preprocess A matrix for row-level sparsity
-  BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
-
-  // Preprocess B matrix for column-level sparsity
-  BMatrixPatternMetadata B_meta = analyze_b_sparsity_pattern_gpu(d_B, inners, cols, BK, TN);
-
-  // Time kernel execution separately
-  auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < runs; i++) {
-    esmm_combined_blockwise_opt<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
-                                A_meta.d_blockPatterns, B_meta.d_blockPatterns,
-                                A_meta.numKBlocks, B_meta.numNBlocks);
-  }
-  cudaDeviceSynchronize();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double, std::milli> elapsed = end - start;
-  double avg_time = elapsed.count() / runs;
-  printf("  Kernel 19 Avg Time: %.3f ms | %.1f GFLOPS\n",
-         avg_time,
-         (2.0 * rows * cols * inners) / (avg_time * 1e6));
-
-  free_block_pattern_metadata(A_meta);
-  free_b_pattern_metadata(B_meta);
-  return true;
-}
-
 // ============================================================================
 // Kernel 19: Joint A+B Sparsity (B-Transpose + Intersection)
 // ============================================================================
@@ -1231,6 +1139,124 @@ bool run_esmm_joint_precomputed_no_check(int rows, int cols, int inners,
     free_block_pattern_metadata(A_meta);
     free_bt_pattern_metadata(B_meta);
     free_joint_pattern_metadata(joint_meta);
+
+    return true;
+}
+
+// ============================================================================
+// Kernel 21: Joint A+B Sparsity with 1D Dispatch (SIMPLIFIED)
+// ============================================================================
+
+bool run_esmm_joint_1d(int rows, int cols, int inners,
+                       float *d_A, float *d_B, float *d_C,
+                       float *h_C, float *h_C_ref, int runs) {
+    // K17 optimal configuration
+    const uint NUM_THREADS = 128;
+    const uint BM = 64;
+    const uint BN = 128;
+    const uint BK = 8;
+    const uint WM = 64;
+    const uint WN = 32;
+    const uint WNITER = 2;
+    const uint TM = 1;
+    const uint TN = 8;
+
+    dim3 blockDim(NUM_THREADS);
+    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+    // Preprocess A matrix (row-wise, WM×BK blocks)
+    BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+
+    // Preprocess B matrix (column-wise, WN×BK blocks)
+    BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
+
+    // Run kernel with 1D dispatch
+    for (int i = 0; i < runs; i++) {
+        esmm_joint_1d<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+            <<<gridDim, blockDim>>>(
+                rows, cols, inners, d_A, d_B, d_C,
+                A_meta.d_blockPatterns,
+                B_meta.d_blockPatterns,
+                A_meta.numKBlocks,
+                B_meta.numNBlocks,
+                B_meta.numKBlocks);
+    }
+
+    cudaDeviceSynchronize();
+
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(error));
+        free_block_pattern_metadata(A_meta);
+        free_bt_pattern_metadata(B_meta);
+        return false;
+    }
+
+    cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+    bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+    free_block_pattern_metadata(A_meta);
+    free_bt_pattern_metadata(B_meta);
+
+    return passed;
+}
+
+bool run_esmm_joint_1d_no_check(int rows, int cols, int inners,
+                                 float *d_A, float *d_B, float *d_C,
+                                 int runs) {
+    const uint NUM_THREADS = 128;
+    const uint BM = 64;
+    const uint BN = 128;
+    const uint BK = 8;
+    const uint WM = 64;
+    const uint WN = 32;
+    const uint WNITER = 2;
+    const uint TM = 1;
+    const uint TN = 8;
+
+    dim3 blockDim(NUM_THREADS);
+    dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+    // Preprocessing (done once)
+    BlockPatternMetadata A_meta = analyze_sparsity_pattern_gpu(d_A, rows, inners, WM, BK);
+    BTPatternMetadata B_meta = preprocess_b_transpose(d_B, inners, cols, WN, BK);
+
+    // Time kernel execution (excluding preprocessing)
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < runs; i++) {
+        esmm_joint_1d<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+            <<<gridDim, blockDim>>>(
+                rows, cols, inners, d_A, d_B, d_C,
+                A_meta.d_blockPatterns,
+                B_meta.d_blockPatterns,
+                A_meta.numKBlocks,
+                B_meta.numNBlocks,
+                B_meta.numKBlocks);
+    }
+
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    double avg_time = elapsed.count() / runs;
+
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("CUDA error: %s\n", cudaGetErrorString(error));
+        free_block_pattern_metadata(A_meta);
+        free_bt_pattern_metadata(B_meta);
+        return false;
+    }
+
+    printf("  K21 (1D Joint) Avg Time: %.3f ms | %.1f GFLOPS\n",
+           avg_time,
+           (2.0 * rows * cols * inners) / (avg_time * 1e6));
+
+    free_block_pattern_metadata(A_meta);
+    free_bt_pattern_metadata(B_meta);
 
     return true;
 }

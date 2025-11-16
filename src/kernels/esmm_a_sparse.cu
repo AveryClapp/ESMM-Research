@@ -99,7 +99,7 @@ __device__ void compute_sparse_block(
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
           const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-    esmm_hybrid_blockwise(int M, int N, int K, float *A, float *B, float *C,
+    esmm_a_sparse_blockwise(int M, int N, int K, float *A, float *B, float *C,
                           const uint8_t* __restrict__ blockPatterns,
                           const int numKBlocks) {
 

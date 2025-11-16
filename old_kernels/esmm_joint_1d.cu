@@ -27,11 +27,11 @@
  *   - Much faster compilation
  */
 
-#include "../../include/utils.cuh"
-#include "../../include/metadata.cuh"
-#include "../../include/pattern_lut.cuh"
-#include "../preprocessors/a_preprocessor_hybrid.cu"
-#include "../preprocessors/b_transpose_preprocessor.cu"
+#include "../include/utils.cuh"
+#include "../include/metadata.cuh"
+#include "../include/pattern_lut.cuh"
+#include "../src/preprocessors/a_preprocessor_hybrid.cu"
+#include "../src/preprocessors/b_transpose_preprocessor.cu"
 #include <cuda_runtime.h>
 
 #ifndef WARPSIZE

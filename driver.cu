@@ -100,7 +100,7 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         break;
     case 13: // Experimental offset based A-Sparsity approach to ESMM
         if (check_results) {
-            res = run_esmm_offsets(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, pattern);
+            res = run_esmm_b_sparse_offsets(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, pattern);
         } else {
             res = run_esmm_offsets_no_check(rows, cols, inners, d_A, d_B, d_C, runs, pattern);
         }

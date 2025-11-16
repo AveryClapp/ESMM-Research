@@ -67,7 +67,6 @@ __device__ __forceinline__ void compute_joint_sparse_block(
     for (int a_idx = 0; a_idx < A_COUNT; ++a_idx) {
         const uint8_t dotIdx = a_offsets[a_idx];
 
-        // Check if B also has this K-index (fully unrolled at compile time)
         bool b_has_offset = false;
         #pragma unroll
         for (int b_idx = 0; b_idx < B_COUNT; ++b_idx) {

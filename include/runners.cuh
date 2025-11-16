@@ -20,10 +20,11 @@
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_4.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_2.cu"
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_1.cu"
-#include "../src/kernels/esmm_hybrid.cu"
+#include "../src/kernels/esmm_a_sparse.cu"
+#include "../src/kernels/esmm_b_sparse_offsets.cu"
 #include "../src/kernels/esmm_btranspose.cu"
-#include "../src/kernels/esmm_joint_precomputed.cu"
-#include "../src/kernels/esmm_joint_1d.cu"
+#include "../old_kernels/esmm_joint_precomputed.cu"
+#include "../old_kernels/esmm_joint_1d.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
 #include "../src/preprocessors/joint_preprocessor.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
@@ -297,16 +298,16 @@ bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
   return verifyResults(h_C, h_C_ref, rows * cols);
 }
 
-bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
+bool run_esmm_b_sparse_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
                     float *d_C, float *h_C, float *h_C_ref, int runs, 
                     std::string_view pattern) {
   const uint NUM_THREADS = 128;
-  const uint BN = 64;
-  const uint BM = 64;
+  const uint BN = 128;  // 2× larger
+  const uint BM = 64;  // 2× larger  
   const uint BK = 8;
   const uint WN = 32;
-  const uint WM = 32;
-  const uint WNITER = 1;
+  const uint WM = 64;
+  const uint WNITER = 2;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -323,28 +324,28 @@ bool run_esmm_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
   cudaMemcpy(sparse_data, sparsity_list.data(), SIZE * sizeof(int), cudaMemcpyHostToDevice);
 
   if (SIZE == 1) {
-    esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+    esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 2) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 3) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 4) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 5) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 6) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 7) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   } else if (SIZE == 8) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
+      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
           <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
   }
 
@@ -727,7 +728,7 @@ bool run_esmm_hybrid(int rows, int cols, int inners, float *d_A, float *d_B,
 
   // Run kernel with block-wise patterns
   for (int i = 0; i < runs; i++) {
-    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+    esmm_a_sparse_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 meta.d_blockPatterns, meta.numKBlocks);
   }
@@ -771,7 +772,7 @@ bool run_esmm_hybrid_large_no_check(int rows, int cols, int inners, float *d_A,
   // Time kernel execution separately
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
-    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+    esmm_a_sparse_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 meta.d_blockPatterns, meta.numKBlocks);
   }
@@ -812,7 +813,7 @@ bool run_esmm_hybrid_no_check(int rows, int cols, int inners, float *d_A,
   // Time kernel execution separately
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
-    esmm_hybrid_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+    esmm_a_sparse_blockwise<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 meta.d_blockPatterns, meta.numKBlocks);
   }

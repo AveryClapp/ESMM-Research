@@ -7,25 +7,16 @@
  *
  * Strategy:
  *   1. Preprocessing computes joint patterns: A ∩ B (bitwise AND)
- *   2. Main kernel does SINGLE pattern lookup (not two)
+ *   2. Main kernel does SINGLE pattern lookup (not two
  *   3. No runtime intersection - just look up precomputed joint offsets
  *
- * Benefits over runtime intersection:
- *   - 64× fewer lookups (1 vs 8×8 comparisons)
- *   - Zero intersection overhead
- *   - Simpler control flow
- *   - Better register allocation
- *
- * Performance:
- *   - Should match K17 speed at A-only (6.5 ms)
- *   - Should achieve 2× speedup at joint 50% sparsity (~3.2 ms)
  *
  */
 
-#include "../../include/utils.cuh"
-#include "../../include/metadata.cuh"
-#include "../../include/pattern_lut.cuh"
-#include "../preprocessors/joint_preprocessor.cu"
+#include "../include/utils.cuh"
+#include "../include/metadata.cuh"
+#include "../include/pattern_lut.cuh"
+#include "../src/preprocessors/joint_preprocessor.cu"
 #include <cuda_runtime.h>
 
 #ifndef WARPSIZE
@@ -57,7 +48,6 @@ __device__ __forceinline__ void compute_sparse_block_btranspose(
         
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-            #pragma unroll
             for (uint tm = 0; tm < TM; ++tm) {
                 const uint mOffset = mBase + wSubRowIdx * WSUBM + tm;
                 const uint baseAddr = dotIdx * BM + mOffset;
@@ -67,27 +57,21 @@ __device__ __forceinline__ void compute_sparse_block_btranspose(
 
         const float* BTs_row = &BTs[dotIdx * BN];
         const uint nBase = warpCol * WN + threadColInWarp * TN;
-        
-        #pragma unroll
+
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-            #pragma unroll
             for (uint tn = 0; tn < TN; ++tn) {
                 const uint nOffset = nBase + wSubColIdx * WSUBN + tn;
                 regN[wSubColIdx * TN + tn] = BTs_row[nOffset];
             }
         }
 
-        #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-            #pragma unroll
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                #pragma unroll
                 for (uint tm = 0; tm < TM; ++tm) {
-                    #pragma unroll
                     for (uint tn = 0; tn < TN; ++tn) {
                         const uint resIdx = (wSubRowIdx * TM + tm) * (WNITER * TN) + 
                                           wSubColIdx * TN + tn;
-                        
+
                         threadResults[resIdx] += regM[wSubRowIdx * TM + tm] * 
                                                 regN[wSubColIdx * TN + tn];
                     }
@@ -143,12 +127,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
-        // ====================================================================
-        // SINGLE LOOKUP: Precomputed joint pattern (A ∩ B)
-        // K-MAJOR LAYOUT: All warps in same K-iteration access consecutive memory!
-        // ====================================================================
-        // OLD (M-major): (globalWarpRow * numNBlocks + globalColBlock) * numKBlocks + kBlock
-        // NEW (K-major): kBlock * numMBlocks * numNBlocks + globalWarpRow * numNBlocks + globalColBlock
         const uint numMBlocks = M / WM;  // Total M-warps in matrix
         const uint patternIdx = kBlock * numMBlocks * numNBlocks + globalWarpRow * numNBlocks + globalColBlock;
         const uint8_t joint_pattern = jointPatterns[patternIdx];

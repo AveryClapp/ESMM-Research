@@ -315,34 +315,20 @@ bool run_esmm_b_sparse_offsets(int rows, int cols, int inners, float *d_A, float
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
-  /* Build list based on sparsity string */
-  uint8_t sparse_data = computeExpandedIndicesBits(pattern);
+  /* Build pattern byte from sparsity string */
+  uint8_t h_pattern = computeExpandedIndicesBits(pattern);
 
-  if (SIZE == 1) {
-    esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 2) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 3) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 4) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 5) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 6) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 7) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  } else if (SIZE == 8) {
-      esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-  }
+  // Allocate and copy pattern to device
+  uint8_t* d_pattern;
+  cudaMalloc(&d_pattern, sizeof(uint8_t));
+  cudaMemcpy(d_pattern, &h_pattern, sizeof(uint8_t), cudaMemcpyHostToDevice);
+
+  // Launch kernel with single pattern byte (SIZE parameter no longer meaningful, but kept for template compatibility)
+  esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+      <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_pattern);
+
+  // Free device pattern memory
+  cudaFree(d_pattern);
 
   cudaDeviceSynchronize();
 
@@ -596,13 +582,13 @@ void run_cuBlas_no_check(int rows, int cols, int inners, float *d_A, float *d_B,
 bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
                           float *d_B, float *d_C, int runs,
                           std::string_view pattern) {
-  const uint NUM_THREADS = 256;
+  const uint NUM_THREADS = 128;
   const uint BN = 128;
-  const uint BM = 128;
+  const uint BM = 64;
   const uint BK = 8;
-  const uint WN = 64;
-  const uint WM = 32;
-  const uint WNITER = 4;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -610,42 +596,19 @@ bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
-  /* Build list based on sparsity string */
-  auto sparsity_list = computeExpandedIndices(pattern);
-  int* sparse_data;
-  const int SIZE = sparsity_list.size();
+  /* Build pattern byte from sparsity string */
+  uint8_t h_pattern = computeExpandedIndicesBits(pattern);
 
-  cudaMalloc(&sparse_data, SIZE * sizeof(int));
-  cudaMemcpy(sparse_data, sparsity_list.data(), SIZE * sizeof(int), cudaMemcpyHostToDevice);
+  // Allocate and copy pattern to device
+  uint8_t* d_pattern;
+  cudaMalloc(&d_pattern, sizeof(uint8_t));
+  cudaMemcpy(d_pattern, &h_pattern, sizeof(uint8_t), cudaMemcpyHostToDevice);
 
   // Time kernel execution
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < runs; i++) {
-    if (SIZE == 1) {
-      esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
-          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 2) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 2>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 3) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 3>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 4) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 4>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 5) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 5>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 6) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 6>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 7) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 7>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    } else if (SIZE == 8) {
-        esmm_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 8>
-            <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, sparse_data);
-    }
+    esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C, d_pattern);
   }
   cudaDeviceSynchronize();
   auto end = std::chrono::high_resolution_clock::now();
@@ -656,7 +619,7 @@ bool run_esmm_offsets_no_check(int rows, int cols, int inners, float *d_A,
          avg_time,
          (2.0 * rows * cols * inners) / (avg_time * 1e6));
 
-  cudaFree(sparse_data);
+  cudaFree(d_pattern);
   return true;
 }
 

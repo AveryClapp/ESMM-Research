@@ -9,6 +9,40 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
+#define WARPSIZE 32
+
+// Device function type for pattern-based computation
+// Computes FMAs based on sparsity pattern
+using PatternComputeFunc = void (*)(float regM_val, const float* regN, float* threadResults, int regNBase, int threadResBase);
+
+// Device functions for each pattern case - these are non-template for simplicity
+__device__ void compute_pattern_0x80(float regM_val, const float* regN, float* threadResults, int regNBase, int threadResBase) {
+	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+}
+
+__device__ void compute_pattern_0xC0(float regM_val, const float* regN, float* threadResults, int regNBase, int threadResBase) {
+	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
+}
+
+__device__ void compute_pattern_0xF0(float regM_val, const float* regN, float* threadResults, int regNBase, int threadResBase) {
+	threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+	threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
+	threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
+	threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
+}
+
+__device__ void compute_pattern_default(float regM_val, const float* regN, float* threadResults, int regNBase, int threadResBase) {
+	// Do nothing for unimplemented patterns
+}
+
+// Macro to generate LUT entries - creates all 256 cases
+#define GET_PATTERN_FUNC(pattern) \
+	((pattern) == 0x80 ? compute_pattern_0x80 : \
+	 (pattern) == 0xC0 ? compute_pattern_0xC0 : \
+	 (pattern) == 0xF0 ? compute_pattern_0xF0 : \
+	 compute_pattern_default)
+
 // ESMM Kernel: B-Sparse Matrix Multiplication with Templated K-wise Offsets
 // SIZE = number of non-zero K-rows to process (compile-time constant)
 // b_offsets = array of SIZE elements indicating which K-rows (0-7) to process
@@ -51,59 +85,56 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	float regM[WMITER * TM] = {0.0};
 	float regN[WNITER * TN] = {0.0};
 
-	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
-		// Load A into shared memory (column-major)
-		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
-			const float4 tmp = reinterpret_cast<const float4 *>(
-				&A[(innerRowA + offset) * K + innerColA * 4])[0];
-			As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-			As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
-		}
+	// Read the pattern byte - each thread reads it once
+	const uint8_t pattern = *b_offsets;
 
-		// Load B into shared memory (row-major)
-		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
-			reinterpret_cast<float4 *>(
-				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-				reinterpret_cast<const float4 *>(
-					&B[(innerRowB + offset) * N + innerColB * 4])[0];
-		}
-		__syncthreads();
 
-		// This is good for right now, but assumes row-sparsity. Bitwise & with A
-		#pragma unroll
-		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
-			#pragma unroll
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				regM[wSubRowIdx] = As[dotIdx * BM + warpRow * WM +
-					wSubRowIdx * WSUBM + threadRowInWarp * TM];
-			}
-
-			#pragma unroll
-			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				for (uint offset = 0; offset < TM; ++offset) {
-				regN[wSubColIdx * TN + offset] = Bs[(dotIdx * BN) + warpCol * 
-					WN + wSubColIdx * WSUBN + threadColInWarp * TN + offset];
-				}
-			}
-
-			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					for (uint8_t sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
-						const uint8_t offIdx = b_offsets[sparse_idx];
-						const int regNBase = wSubColIdx * TN;
-						const int threadResBase = wSubRowIdx * (WNITER * TN) + (wSubColIdx * TN);
-						threadResults[threadResBase + offIdx] += regM[wSubRowIdx] * regN[regNBase + offIdx];
-					}
-				}
-			}
-		}
-
-		A += BK;
-		B += BK * N;
-		__syncthreads();
+for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
+	// Load A into shared memory (column-major)
+	for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
+		const float4 tmp = reinterpret_cast<const float4 *>(
+			&A[(innerRowA + offset) * K + innerColA * 4])[0];
+		As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
+		As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
+		As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
+		As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
 	}
+	// Load B into shared memory (row-major)
+	for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
+		reinterpret_cast<float4 *>(
+			&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
+			reinterpret_cast<const float4 *>(
+				&B[(innerRowB + offset) * N + innerColB * 4])[0];
+	}
+	__syncthreads();
+	#pragma unroll
+	for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
+		#pragma unroll
+		for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+			regM[wSubRowIdx] = As[dotIdx * BM + warpRow * WM +
+				wSubRowIdx * WSUBM + threadRowInWarp * TM];
+		}
+		#pragma unroll
+		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+			for (uint offset = 0; offset < TN; ++offset) {
+				regN[wSubColIdx * TN + offset] = Bs[(dotIdx * BN) + warpCol *
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + offset];
+			}
+		}
+		for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+				const int regNBase = wSubColIdx * TN;
+				const int threadResBase = wSubRowIdx * (WNITER * TN) + (wSubColIdx * TN);
+				// Look up table here? Not worth
+				compute_pattern_0x80(regM[wSubRowIdx], regN, threadResults, regNBase, threadResBase);
+			}
+		}
+	}
+	A += BK;
+	B += BK * N;
+	__syncthreads();
+}
+break;
 
 	// Write results back to C
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {

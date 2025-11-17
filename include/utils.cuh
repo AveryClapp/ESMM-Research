@@ -425,18 +425,18 @@ std::vector<int> computeExpandedIndices(std::string_view pattern) {
 }
 
 uint8_t computeExpandedIndicesBits(std::string_view pattern) {
-  std::vector<int> indices;
-  int patternSize = pattern.size();
-  // 00000000
   uint8_t resp = 0;
-  std::vector<int> patternIndices;
-  for (int i = 0; i < patternSize; i++) {
+  int patternSize = pattern.size();
+
+  // Convert binary string to byte (MSB first)
+  // Example: "10000000" -> 0x80, "11000000" -> 0xC0, "11110000" -> 0xF0
+  for (int i = 0; i < patternSize && i < 8; i++) {
     if (pattern[i] == '1') {
-      resp <<= 1;
+      resp |= (1 << (7 - i));
     }
   }
 
-  return resp ^ 0xFF;
+  return resp;
 }
 void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int cols,  int BM, int BK, int WMITER, int WSUBM) {
   using P = PreprocessParams;

@@ -1,26 +1,33 @@
 #pragma once
 
-/* GPU Preprocessor for B-Matrix Sparsity (Column-wise patterns) */
+/* GPU Preprocessor for B-Matrix Sparsity (K-wise patterns per N-column) */
 
 #include "../../include/metadata.cuh"
 #include "../../include/utils.cuh"
 #include <cuda_runtime.h>
 
 /*
- * B-Matrix GPU Preprocessing Kernel (OPTIMIZED)
+ * B-Matrix GPU Preprocessing Kernel (K-WISE PATTERNS)
  *
- * Analyzes B matrix (K × N) in blocks of BK × TN (typically 8 × 8)
- * Creates 8-bit patterns indicating which of TN columns are non-zero
+ * CRITICAL: This preprocessor creates patterns across the K dimension!
  *
- * Key optimizations:
- * 1. Full warp utilization - all 32 threads active
- * 2. Each warp processes multiple N-blocks in parallel
- * 3. Coalesced memory access via shared memory
- * 4. Warp-level reductions for pattern combination
+ * For each N-column group (width TN), creates an 8-bit pattern indicating
+ * which K-rows (within a BK block) are non-zero.
+ *
+ * Pattern encoding:
+ * - Bit i is set if ANY element in K-row i (across TN columns) is non-zero
+ * - This allows the kernel to skip K iterations where B has all zeros
  *
  * Memory layout:
  * - B is K × N, row-major
- * - Output: (K/BK) × (N/TN) patterns, each 1 byte
+ * - Output: (K/BK) × (N/TN) patterns
+ *   Each pattern represents which K-rows are non-zero for that N-column group
+ *
+ * Example: For a BK=8, TN=8 block at (kBlock=0, nBlock=0):
+ *   Pattern bit 0 = 1 if any B[0, 0:8] is non-zero
+ *   Pattern bit 1 = 1 if any B[1, 0:8] is non-zero
+ *   ...
+ *   Pattern bit 7 = 1 if any B[7, 0:8] is non-zero
  */
 template <const int BK, const int TN, const int NUM_THREADS>
 __global__ void preprocess_b_patterns(
@@ -42,31 +49,37 @@ __global__ void preprocess_b_patterns(
 
     const int globalKBase = kBlock * BK;
 
-    for (int nBlockBase = warpId; nBlockBase < numNBlocks; nBlockBase += WARPS_PER_BLOCK) {
+    // Each warp processes multiple N-blocks
+    for (int nBlock = warpId; nBlock < numNBlocks; nBlock += WARPS_PER_BLOCK) {
         uint8_t threadPattern = 0;
+
+        const int globalNBase = nBlock * TN;
 
         constexpr int ELEMENTS_PER_WARP = BK * TN;
         constexpr int ELEMENTS_PER_THREAD = (ELEMENTS_PER_WARP + WARP_SIZE - 1) / WARP_SIZE;
 
+        // Each thread checks a subset of the BK×TN block
         #pragma unroll
         for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
             const int flatIdx = laneId + i * WARP_SIZE;
             if (flatIdx < ELEMENTS_PER_WARP) {
-                const int kRow = flatIdx / TN;
-                const int nCol = flatIdx % TN;
+                const int kRow = flatIdx / TN;  // Which K-row within block (0-7)
+                const int nCol = flatIdx % TN;  // Which N-col within block (0-7)
 
                 const int globalRow = globalKBase + kRow;
-                const int globalCol = nBlockBase * TN + nCol;
+                const int globalCol = globalNBase + nCol;
 
                 if (globalRow < K && globalCol < N) {
                     float val = B[globalRow * N + globalCol];
                     if (val != 0.0f) {
-                        threadPattern |= (1 << nCol);
+                        // Set bit kRow (not nCol!) - this is the KEY change
+                        threadPattern |= (1 << kRow);
                     }
                 }
             }
         }
 
+        // Combine patterns across warp using OR reduction
         uint8_t blockPattern = threadPattern;
 
         #pragma unroll
@@ -74,8 +87,9 @@ __global__ void preprocess_b_patterns(
             blockPattern |= __shfl_xor_sync(0xFFFFFFFF, blockPattern, offset);
         }
 
+        // Write final pattern: one per (kBlock, nBlock) pair
         if (laneId == 0) {
-            const int outIdx = kBlock * numNBlocks + nBlockBase;
+            const int outIdx = kBlock * numNBlocks + nBlock;
             blockPatterns[outIdx] = blockPattern;
         }
     }
@@ -123,7 +137,7 @@ BMatrixPatternMetadata analyze_b_sparsity_pattern_gpu(float* d_B, int K, int N, 
     }
 
     float metadataKB = totalBlocks / 1024.0f;
-    printf("B-matrix GPU preprocessing: %d blocks (%.1f KB metadata) in %.3f ms\n",
+    printf("B-matrix GPU preprocessing (K-wise): %d blocks (%.1f KB metadata) in %.3f ms\n",
            totalBlocks, metadataKB, milliseconds);
 
     cudaEventDestroy(start);

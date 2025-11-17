@@ -9,13 +9,15 @@
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
-// ESMM Kernel: Warp-tiled sparse matrix multiplication
-// Uses metadata-driven computation to skip zero elements in A matrix
-template <const int BM, const int BN, const int BK, const int WM, 
-			const int WN, const int WNITER, const int TM, const int TN, 
+// ESMM Kernel: B-Sparse Matrix Multiplication with Templated K-wise Offsets
+// SIZE = number of non-zero K-rows to process (compile-time constant)
+// b_offsets = array of SIZE elements indicating which K-rows (0-7) to process
+template <const int BM, const int BN, const int BK, const int WM,
+			const int WN, const int WNITER, const int TM, const int TN,
 			const int NUM_THREADS, const int SIZE>
 __global__ void __launch_bounds__(NUM_THREADS)
-	esmm_b_sparse_offsets(int M, int N, int K, float *A, float *B, float *C, int *b_offsets) {
+	esmm_b_sparse_offsets(int M, int N, int K, float *A, float *B, float *C,
+						  const uint8_t* __restrict__ b_offsets) {
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
@@ -25,14 +27,14 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
 	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
 	constexpr uint WSUBM = WM / WMITER;
-	constexpr uint WSUBN = WN / WNITER; 
+	constexpr uint WSUBN = WN / WNITER;
 
 	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
-	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
-	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
+	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
+	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-	__shared__ float As[BN * BK];
-	__shared__ float Bs[BM * BK];
+	__shared__ float As[BM * BK];
+	__shared__ float Bs[BK * BN];
 
 	A += cRow * BM * K;
 	B += cCol * BN;
@@ -50,6 +52,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	float regN[WNITER * TN] = {0.0};
 
 	for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
+		// Load A into shared memory (column-major)
 		for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
 			const float4 tmp = reinterpret_cast<const float4 *>(
 				&A[(innerRowA + offset) * K + innerColA * 4])[0];
@@ -58,6 +61,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
 			As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
 			As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
 		}
+
+		// Load B into shared memory (row-major)
 		for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
 			reinterpret_cast<float4 *>(
 				&Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
@@ -65,33 +70,42 @@ __global__ void __launch_bounds__(NUM_THREADS)
 					&B[(innerRowB + offset) * N + innerColB * 4])[0];
 		}
 		__syncthreads();
+
+		// This is good for right now, but assumes row-sparsity. Bitwise & with A
+		#pragma unroll
 		for (int8_t dotIdx = 0; dotIdx < BK; ++dotIdx) {
+			#pragma unroll
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-				regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+				regM[wSubRowIdx] = As[dotIdx * BM + warpRow * WM +
 					wSubRowIdx * WSUBM + threadRowInWarp * TM];
 			}
+
+			#pragma unroll
 			for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-				for (uint offset = 0; offset < TN; ++offset) {
-					regN[wSubColIdx * TN + offset] = Bs[(dotIdx * BN) + warpCol * 
-						WN + wSubColIdx * WSUBN + threadColInWarp * TN + offset];
+				for (uint offset = 0; offset < TM; ++offset) {
+				regN[wSubColIdx * TN + offset] = Bs[(dotIdx * BN) + warpCol * 
+					WN + wSubColIdx * WSUBN + threadColInWarp * TN + offset];
 				}
 			}
+
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					for (uint idx = 0; idx < SIZE; ++idx) {
-						const uint offset = b_offsets[idx];
-						const uint resIdx = wSubRowIdx * (WNITER * TN) + wSubColIdx * TN;
-						threadResults[resIdx + offset] += regM[wSubRowIdx] + 
-											regN[wSubColIdx * TN + offset];
+					for (uint8_t sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
+						const uint8_t offIdx = b_offsets[sparse_idx];
+						const int regNBase = wSubColIdx * TN;
+						const int threadResBase = wSubRowIdx * (WNITER * TN) + (wSubColIdx * TN);
+						threadResults[threadResBase + offIdx] += regM[wSubRowIdx] * regN[regNBase + offIdx];
 					}
 				}
 			}
 		}
+
 		A += BK;
 		B += BK * N;
 		__syncthreads();
 	}
 
+	// Write results back to C
 	for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
 		for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
 			float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
@@ -109,7 +123,7 @@ __global__ void __launch_bounds__(NUM_THREADS)
 						threadColInWarp * TN + resIdxN])[0] = tmp;
 				}
 			}
-		}	
-	}		
+		}
+	}
 }
 

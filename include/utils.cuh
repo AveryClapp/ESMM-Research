@@ -190,6 +190,26 @@ void randomize_matrix_B_kdim_pattern(float *mat, int K, int N,
   }
 }
 
+// Generate sparsity along N-dimension (columns) for B matrix
+// This allows skipping specific columns within TN blocks
+void randomize_matrix_B_ndim_pattern(float *mat, int K, int N,
+    std::string_view pattern) {
+  for (int k = 0; k < K; k++) {
+    for (int n = 0; n < N; n++) {
+      int pattern_idx = n % PATTERN_LENGTH;  // Pattern along N (columns)
+      bool col_is_zero = (pattern[pattern_idx] == '0');
+
+      if (col_is_zero) {
+        mat[k * N + n] = 0.0f;  // Column zero
+      } else {
+        float tmp = (float)(rand() % 5) + 0.01 * (rand() % 5);
+        tmp = (rand() % 2 == 0) ? tmp : tmp * (-1.);
+        mat[k * N + n] = tmp;
+      }
+    }
+  }
+}
+
 void randomize_matrix(float *mat, int M, int N) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
@@ -404,6 +424,20 @@ std::vector<int> computeExpandedIndices(std::string_view pattern) {
   return indices;
 }
 
+uint8_t computeExpandedIndicesBits(std::string_view pattern) {
+  std::vector<int> indices;
+  int patternSize = pattern.size();
+  // 00000000
+  uint8_t resp = 0;
+  std::vector<int> patternIndices;
+  for (int i = 0; i < patternSize; i++) {
+    if (pattern[i] == '1') {
+      resp <<= 1;
+    }
+  }
+
+  return resp ^ 0xFF;
+}
 void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int cols,  int BM, int BK, int WMITER, int WSUBM) {
   using P = PreprocessParams;
 

@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11110000";
+    constexpr std::string_view sparsity = "11111111";
 
     // Default values
     std::vector<int> kernel_choices = {13};
@@ -242,16 +242,11 @@ int main(int argc, char *argv[]) {
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
 
-    // Generate matrices based on sparsity mode
     if (use_random_sparsity) {
-        // Random unstructured sparsity
         randomize_matrix_unstructured(h_A, rows, inners, random_sparsity_percent, random_seed);
         randomize_matrix_unstructured(h_B, inners, cols, random_sparsity_percent, random_seed + 1);
     } else {
-        // Pattern-based sparsity
-        // A: K-dimension sparsity (rows) - for skipping K-blocks
         randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-        // B: K-dimension sparsity (rows) - allows block-level skipping
         randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
     }
     memset(h_C, 0, rows * cols * sizeof(float));

@@ -299,7 +299,7 @@ bool run_esmm_buffered(int rows, int cols, int inners, float *d_A, float *d_B,
 }
 
 bool run_esmm_b_sparse_offsets(int rows, int cols, int inners, float *d_A, float *d_B,
-                    float *d_C, float *h_C, float *h_C_ref, int runs, 
+                    float *d_C, float *h_C, float *h_C_ref, int runs,
                     std::string_view pattern) {
   const uint NUM_THREADS = 128;
   const uint BN = 128;  // 2× larger
@@ -316,12 +316,7 @@ bool run_esmm_b_sparse_offsets(int rows, int cols, int inners, float *d_A, float
   cudaMemset(d_C, 0, rows * cols * sizeof(float));
 
   /* Build list based on sparsity string */
-  auto sparsity_list = computeExpandedIndices(pattern);
-  int* sparse_data;
-  const int SIZE = sparsity_list.size();
-
-  cudaMalloc(&sparse_data, SIZE * sizeof(int));
-  cudaMemcpy(sparse_data, sparsity_list.data(), SIZE * sizeof(int), cudaMemcpyHostToDevice);
+  uint8_t sparse_data = computeExpandedIndicesBits(pattern);
 
   if (SIZE == 1) {
     esmm_b_sparse_offsets<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS, 1>

@@ -98,11 +98,11 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_buffered_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 13: // Experimental offset based A-Sparsity approach to ESMM
+    case 13: // Experimental B Sparsity Lookup Table + Function Ptrs
         if (check_results) {
-            res = run_esmm_b_sparse_offsets(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, pattern);
+            res = run_esmm_b_fp_lut(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, pattern);
         } else {
-            res = run_esmm_offsets_no_check(rows, cols, inners, d_A, d_B, d_C, runs, pattern);
+            res = run_esmm_b_fp_lut_no_check(rows, cols, inners, d_A, d_B, d_C, runs, pattern);
         }
         break;
     case 14: // Experimental offset based A-Sparsity approach to ESMM
@@ -120,39 +120,18 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         }
         res = true; // Assume cuBLAS always succeeds
         break;
-    case 16: // ESMM Block-wise Uniform (Per-Warp Pattern Encoding)
+    case 16: // ESMM Block-wise Uniform A Sparsity (Per-Warp Pattern Encoding)
         if (check_results) {
-            res = run_esmm_hybrid(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+            res = run_esmm_a_sparse_blockwise(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
-            res = run_esmm_hybrid_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+            res = run_esmm_a_sparse_blockwise_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 18: // ESMM B-Transpose
+    case 17: // ESMM B-Sparse Warp-Granularity (Zero-Divergence)
         if (check_results) {
-            res = run_esmm_btranspose(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+            res = run_esmm_b_sparse_warp(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
-            res = run_esmm_btranspose_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 19: // ESMM Joint A+B Sparsity (B-Transpose + Intersection)
-        if (check_results) {
-            res = run_esmm_btranspose_joint(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_btranspose_joint_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 20: // ESMM Joint A+B Sparsity (Precomputed Patterns)
-        if (check_results) {
-            res = run_esmm_joint_precomputed(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_joint_precomputed_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 21: // ESMM Joint A+B Sparsity (1D Dispatch - Simplified)
-        if (check_results) {
-            res = run_esmm_joint_1d(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_joint_1d_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+            res = run_esmm_b_sparse_warp_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
     default:
@@ -174,13 +153,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 int main(int argc, char *argv[]) {
 
     // Define Matrix Dims
-    constexpr int rows = 4096;
-    constexpr int cols = 4096;
-    constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11110000";
+    constexpr int rows = 1024;
+    constexpr int cols = 1024;
+    constexpr int inners = 1024;
+    constexpr std::string_view sparsity = "10000000";
 
     // Default values
-    std::vector<int> kernel_choices = {13};
+    std::vector<int> kernel_choices = {17};
     int runs = 1;
     bool verbose = false;
     bool check_results = true;

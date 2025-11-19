@@ -68,8 +68,8 @@ const char* get_kernel_name(int kernel_choice) {
     case 13: return "ESMM Offsets";
     case 14: return "ESMM Unrolled";
     case 15: return "cuBLAS";
-    case 16: return "ESMM Pattern-Specialized (Zero Overhead)";
-    case 17: return "ESMM Block-wise Uniform (Per-Warp Pattern Encoding)";
+    case 16: return "ESMM A-Sparse Block-wise (Warp-Granularity Patterns)";
+    case 17: return "ESMM B-Sparse Warp-Granularity (Zero-Divergence)";
     case 18: return "ESMM Combined A+B Sparsity";
     case 19: return "ESMM Joint A+B Sparsity (B-Transpose + Intersection)";
     case 20: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";

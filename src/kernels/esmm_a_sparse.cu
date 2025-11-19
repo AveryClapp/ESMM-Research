@@ -52,10 +52,10 @@ __device__ void compute_sparse_block(
     for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
         const uint8_t dotIdx = offsets[sparse_idx];
 
-        // Load from shared memory A
+        // Load from shared memory A (using BM+1 for padded layout)
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-            regM[wSubRowIdx] = As[(dotIdx * BM) + warpRow * WM +
+            regM[wSubRowIdx] = As[(dotIdx * (BM + 1)) + warpRow * WM +
                 wSubRowIdx * WSUBM + threadRowInWarp * TM];
         }
 
@@ -118,7 +118,8 @@ __global__ void __launch_bounds__(NUM_THREADS)
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    __shared__ float As[BM * BK];
+    // Pad As to avoid bank conflicts (BM=64 is power-of-2)
+    __shared__ float As[(BM + 1) * BK];
     __shared__ float Bs[BN * BK];
 
     A += cRow * BM * K;
@@ -154,10 +155,11 @@ __global__ void __launch_bounds__(NUM_THREADS)
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
                 &A[(innerRowA + offset) * K + innerColA * 4])[0];
-            As[(innerColA * 4 + 0) * BM + innerRowA + offset] = tmp.x;
-            As[(innerColA * 4 + 1) * BM + innerRowA + offset] = tmp.y;
-            As[(innerColA * 4 + 2) * BM + innerRowA + offset] = tmp.z;
-            As[(innerColA * 4 + 3) * BM + innerRowA + offset] = tmp.w;
+            // Store with padding (BM+1) to avoid bank conflicts
+            As[(innerColA * 4 + 0) * (BM + 1) + innerRowA + offset] = tmp.x;
+            As[(innerColA * 4 + 1) * (BM + 1) + innerRowA + offset] = tmp.y;
+            As[(innerColA * 4 + 2) * (BM + 1) + innerRowA + offset] = tmp.z;
+            As[(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
         }
         // Load B tile
         for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {

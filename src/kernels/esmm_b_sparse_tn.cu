@@ -1,44 +1,45 @@
 #pragma once
 /*
  * ============================================================================
- * Kernel: ESMM B-Sparse Warp-Granularity
+ * Kernel: ESMM B-Sparse TN-Granularity (8-column blocks)
  * ============================================================================
  *
  * Strategy:
- *   Use warp-granularity patterns (BK × WN blocks) to enable warp-uniform
- *   skipping of K-iterations where B matrix is sparse.
+ *   Use TN-granularity patterns (BK × TN blocks) to enable per-thread-group
+ *   sparsity exploitation. Each pattern covers the 8 columns that a thread
+ *   group actually works on.
  *
  * Architecture:
- *   - Preprocessing: OR together sparsity across WN=32 columns → single 8-bit pattern
- *   - Runtime: Load pattern per warp-column, reconstruct offsets, switch on count
+ *   - Preprocessing: OR together sparsity across TN=8 columns → single 8-bit pattern
+ *   - Runtime: Each thread group loads its own pattern (4 patterns per warp)
  *   - Computation: Template dispatch enables full loop unrolling
  *
  * Performance Characteristics:
- *   - Memory: 1 byte per 8×32 block (~64 KB for 4096×4096)
- *   - Divergence: Zero (warp-uniform pattern)
- *   - Overhead: Minimal (single byte load + bit manipulation)
+ *   - Memory: 4× more patterns than WN-granularity (~256 KB for 4096×4096)
+ *   - Divergence: Potentially higher (different thread groups may diverge)
+ *   - Precision: Better (only compute what each thread group needs)
  *
- * Key Difference from A-Sparse:
- *   - A-sparse: Pattern indexed by (warpRow, kBlock) - sparsity in A's columns
- *   - B-sparse: Pattern indexed by (kBlock, warpCol) - sparsity in B's rows
- *   - Both skip the SAME K-iterations (dotIdx), just different patterns
+ * Key Difference from WN-granularity:
+ *   - WN=32: One pattern per warp → all threads use same pattern → warp-uniform
+ *   - TN=8: One pattern per thread group → different groups may diverge → thread-divergent
+ *   - Tradeoff: Finer granularity vs. potential warp divergence
  */
 
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"
 #include "../../include/pattern_lut.cuh"
 #include "../../include/b_sparse_helpers.cuh"
-#include "../preprocessors/b_preprocessor_warp.cu"
+#include "../preprocessors/b_preprocessor_tn.cu"
 #include <cuda_runtime.h>
 
 // ============================================================================
-// Main kernel: B-sparse with warp-granularity patterns
+// Main kernel: B-sparse with TN-granularity patterns (8 columns per pattern)
 // ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
     const int WNITER, const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-    esmm_b_sparse_warp(int M, int N, int K, float *A, float *B, float *C,
+    esmm_b_sparse_tn(int M, int N, int K, float *A, float *B, float *C,
             const uint8_t* __restrict__ blockPatterns,
             const int numKBlocks) {
 
@@ -73,30 +74,17 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
         float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-
         float regM[WMITER * TM];
         float regN[WNITER * TN];
 
-
-        // KEY DIFFERENCE: Pattern indexed by warp column (not warp row)
-        const uint globalWarpCol = cCol * (BN / WN) + warpCol;
-        const int numNBlocks = N / WN;
+        // KEY DIFFERENCE: Pattern indexed by (kBlock, globalTNBlock)
+        // Each thread group has its own pattern for its 8 columns
+        // WN=32, TN=8 means each warp covers 4 TN-blocks (32/8=4)
+        const uint baseGlobalTNBlock = (cCol * BN + warpCol * WN) / TN;
+        const int numTNBlocks = N / TN;  // Number of 8-column blocks
 
         for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
             const uint kBlock = bkIdx / BK;
-
-            // B-sparse: Pattern indexed by (kBlock, warpCol)
-            const uint blockId = kBlock * numNBlocks + globalWarpCol;
-            const uint8_t pattern = blockPatterns[blockId];
-
-            const uint8_t count = PATTERN_LUT_BK8[pattern].count;
-            const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
-
-            if (count == 0) {
-                A += BK;
-                B += BK * N;
-                continue;
-            }
 
             // Load A tile
             for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
@@ -116,7 +104,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
                             &B[(innerRowB + offset) * N + innerColB * 4])[0];
             }
             __syncthreads();
-
 
             #pragma unroll
             for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
@@ -154,12 +141,21 @@ __global__ void __launch_bounds__(NUM_THREADS)
                 for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
                     #pragma unroll
                     for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                        dispatch_multiply(count, wSubRowIdx, wSubColIdx, WNITER,
-                                regM[wSubRowIdx], regN, threadResults, offsets);
+                        const uint localTNBlockInWarp = wSubColIdx * (WSUBN / TN) + threadColInWarp;
+                        const uint globalTNBlock = baseGlobalTNBlock + localTNBlockInWarp;
+                        const uint blockId = kBlock * numTNBlocks + globalTNBlock;
+                        const uint8_t pattern = blockPatterns[blockId];
+
+                        const uint8_t count = PATTERN_LUT_BK8[pattern].count;
+                        const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
+
+                        if (count > 0) {
+                            dispatch_multiply(count, wSubRowIdx, wSubColIdx, WNITER,
+                                    regM[wSubRowIdx], regN, threadResults, offsets);
+                        }
                     }
                 }
             }
-
 
             A += BK;
             B += BK * N;

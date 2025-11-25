@@ -69,10 +69,10 @@ const char* get_kernel_name(int kernel_choice) {
     case 14: return "ESMM Unrolled";
     case 15: return "cuBLAS";
     case 16: return "ESMM A-Sparse Block-wise (Warp-Granularity Patterns)";
-    case 17: return "ESMM B-Sparse Warp-Granularity (Zero-Divergence)";
-    case 18: return "ESMM Combined A+B Sparsity";
-    case 19: return "ESMM Joint A+B Sparsity (B-Transpose + Intersection)";
-    case 20: return "ESMM B-Transpose (Warp-Uniform B-Sparsity)";
+    case 17: return "ESMM B-Sparse Warp-Granularity (32-col, Zero-Divergence)";
+    case 18: return "ESMM B-Sparse TN-Granularity (8-col, Per Thread-Group)";
+    case 19: return "ESMM B-Transpose Sparse (K-iteration Skipping)";
+    case 20: return "ESMM Joint A+B Sparsity (B-Transpose + Intersection)";
     case 21: return "ESMM A+B Offset Lists (8x8 Templated)";
     case 22: return "ESMM B-Transpose + 8x8 Offset Templates (Joint K-Sparsity)";
     case 23: return "ESMM Joint Precomputed (Zero-Overhead Joint A+B Sparsity)";

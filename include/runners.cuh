@@ -22,7 +22,9 @@
 #include "../src/kernels/unrolled_kernels/esmm_unrolled_1.cu"
 #include "../src/kernels/esmm_a_sparse.cu"
 #include "../src/kernels/esmm_b_sparse_warp.cu"
+#include "../src/kernels/esmm_b_sparse_tn.cu"
 #include "../src/kernels/esmm_b_fp_lut.cu"
+#include "../src/kernels/esmm_b_transpose_k19.cu"
 #include "../src/kernels/esmm_btranspose.cu"
 #include "../old_kernels/esmm_joint_precomputed.cu"
 #include "../old_kernels/esmm_joint_1d.cu"
@@ -913,4 +915,156 @@ bool run_esmm_b_sparse_warp_no_check(int rows, int cols, int inners, float *d_A,
   return true;
 }
 
+// ============================================================================
+// B-Sparse TN-Granularity (8-column patterns per thread group)
+// ============================================================================
+
+bool run_esmm_b_sparse_tn(int rows, int cols, int inners, float *d_A, float *d_B,
+                          float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess B matrix with TN-granularity patterns
+  BMatrixPatternMetadata meta = analyze_b_sparsity_tn_granularity(d_B, inners, cols, BK, TN);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_b_sparse_tn<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_b_pattern_metadata(meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_b_pattern_metadata(meta);
+  return passed;
+}
+
+bool run_esmm_b_sparse_tn_no_check(int rows, int cols, int inners, float *d_A,
+                                   float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess B matrix with TN-granularity patterns
+  BMatrixPatternMetadata meta = analyze_b_sparsity_tn_granularity(d_B, inners, cols, BK, TN);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_b_sparse_tn<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_blockPatterns, meta.numKBlocks);
+  }
+  cudaDeviceSynchronize();
+
+  free_b_pattern_metadata(meta);
+  return true;
+}
+
+
+
+
+// ============================================================================
+// K19: B-Transpose Sparse (WN-granularity)
+// ============================================================================
+
+bool run_esmm_b_transpose_k19(int rows, int cols, int inners, float *d_A, float *d_B,
+                               float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess: transpose B and analyze patterns
+  BTransposeMetadata meta = preprocess_b_transpose_simple(d_B, inners, cols, BK, WN);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_b_transpose_k19<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, meta.d_B_T, d_C,
+                                meta.d_rowPatterns, meta.numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_b_transpose_metadata(meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_b_transpose_metadata(meta);
+  return passed;
+}
+
+bool run_esmm_b_transpose_k19_no_check(int rows, int cols, int inners, float *d_A,
+                                        float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess: transpose B and analyze patterns
+  BTransposeMetadata meta = preprocess_b_transpose_simple(d_B, inners, cols, BK, WN);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_b_transpose_k19<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, meta.d_B_T, d_C,
+                                meta.d_rowPatterns, meta.numKBlocks);
+  }
+  cudaDeviceSynchronize();
+
+  free_b_transpose_metadata(meta);
+  return true;
+}
 

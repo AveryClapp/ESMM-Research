@@ -12,9 +12,7 @@ __forceinline__ __device__ void multiply_offsets_1(int wSubRowIdx, int wSubColId
     const int regNBase = wSubColIdx * 8;
     const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
 
-    // 1 Op using offsetList[0]
-    int off0 = offsetList[0];
-    threadResults[threadResBase + off0] += regM_val * regN[regNBase + off0];
+    threadResults[threadResBase + offsetList[0]] += regM_val * regN[regNBase + offsetList[0]];
 }
 
 __forceinline__ __device__ void multiply_offsets_2(int wSubRowIdx, int wSubColIdx,
@@ -23,10 +21,10 @@ __forceinline__ __device__ void multiply_offsets_2(int wSubRowIdx, int wSubColId
         const uint8_t* offsetList) {
     const int regNBase = wSubColIdx * 8;
     const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-
-    // 2 Ops
     threadResults[threadResBase + offsetList[0]] += regM_val * regN[regNBase + offsetList[0]];
     threadResults[threadResBase + offsetList[1]] += regM_val * regN[regNBase + offsetList[1]];
+
+
 }
 
 __forceinline__ __device__ void multiply_offsets_4(int wSubRowIdx, int wSubColIdx,
@@ -45,20 +43,19 @@ __forceinline__ __device__ void multiply_offsets_4(int wSubRowIdx, int wSubColId
 
 __forceinline__ __device__ void multiply_offsets_8(int wSubRowIdx, int wSubColIdx,
         int WNITER, float regM_val,
-        float* regN, float* threadResults,
-        const uint8_t* offsetList) {
+        float* regN, float* threadResults) {
     const int regNBase = wSubColIdx * 8;
     const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
 
     // 8 Ops - dense case
-    threadResults[threadResBase + offsetList[0]] += regM_val * regN[regNBase + offsetList[0]];
-    threadResults[threadResBase + offsetList[1]] += regM_val * regN[regNBase + offsetList[1]];
-    threadResults[threadResBase + offsetList[2]] += regM_val * regN[regNBase + offsetList[2]];
-    threadResults[threadResBase + offsetList[3]] += regM_val * regN[regNBase + offsetList[3]];
-    threadResults[threadResBase + offsetList[4]] += regM_val * regN[regNBase + offsetList[4]];
-    threadResults[threadResBase + offsetList[5]] += regM_val * regN[regNBase + offsetList[5]];
-    threadResults[threadResBase + offsetList[6]] += regM_val * regN[regNBase + offsetList[6]];
-    threadResults[threadResBase + offsetList[7]] += regM_val * regN[regNBase + offsetList[7]];
+    threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+    threadResults[threadResBase + 1] += regM_val * regN[regNBase + 1];
+    threadResults[threadResBase + 2] += regM_val * regN[regNBase + 2];
+    threadResults[threadResBase + 3] += regM_val * regN[regNBase + 3];
+    threadResults[threadResBase + 4] += regM_val * regN[regNBase + 4];
+    threadResults[threadResBase + 5] += regM_val * regN[regNBase + 5];
+    threadResults[threadResBase + 6] += regM_val * regN[regNBase + 6];
+    threadResults[threadResBase + 7] += regM_val * regN[regNBase + 7];
 }
 
 __forceinline__ __device__ void dispatch_multiply(int mode, int wSubRowIdx, int wSubColIdx,
@@ -76,7 +73,7 @@ __forceinline__ __device__ void dispatch_multiply(int mode, int wSubRowIdx, int 
             multiply_offsets_4(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsetList);
             break;
         case 8:
-            multiply_offsets_8(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsetList);
+            multiply_offsets_8(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults);
             break;
     }
 }

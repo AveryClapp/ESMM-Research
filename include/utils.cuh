@@ -72,7 +72,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 17: return "ESMM B-Sparse Warp-Granularity (32-col, Zero-Divergence)";
     case 18: return "ESMM B-Sparse TN-Granularity (8-col, Per Thread-Group)";
     case 19: return "ESMM B-Transpose Sparse (K-iteration Skipping)";
-    case 20: return "ESMM Joint A+B Sparsity (B-Transpose + Intersection)";
+    case 20: return "ESMM B-Sparse Shared Memory Transpose (WN-granularity)";
     case 21: return "ESMM A+B Offset Lists (8x8 Templated)";
     case 22: return "ESMM B-Transpose + 8x8 Offset Templates (Joint K-Sparsity)";
     case 23: return "ESMM Joint Precomputed (Zero-Overhead Joint A+B Sparsity)";
@@ -564,7 +564,6 @@ bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_
 */
 
 
-//TODO: Replace these with unrolled loops file
 __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
     int WNITER, float regM_val, float* regN,
     float* threadResults) {

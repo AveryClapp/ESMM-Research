@@ -24,18 +24,6 @@
 #include "../preprocessors/b_transpose_preprocessor_simple.cu"
 #include <cuda_runtime.h>
 
-// Dense multiply helper
-__forceinline__ __device__ void multiply_dense_k19(int wSubRowIdx, int wSubColIdx,
-        int WNITER, float regM_val, float* regN, float* threadResults) {
-    const int regNBase = wSubColIdx * 8;
-    const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
-
-    #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        threadResults[threadResBase + i] += regM_val * regN[regNBase + i];
-    }
-}
-
 // Compute sparse block (template instantiated for SIZE=1..8)
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
           const int WNITER, const int TM, const int TN, const int SIZE>
@@ -53,12 +41,10 @@ __device__ void compute_sparse_block_k19(
     float regM[WMITER * TM];
     float regN[WNITER * TN];
 
-    // Loop over only non-zero K-iterations
     #pragma unroll
     for (int sparse_idx = 0; sparse_idx < SIZE; ++sparse_idx) {
         const uint8_t dotIdx = offsets[sparse_idx];
 
-        // Load A from shared memory (same as K16)
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             regM[wSubRowIdx] = As[(dotIdx * (BM + 1)) + warpRow * WM +
@@ -81,21 +67,14 @@ __device__ void compute_sparse_block_k19(
             regN[wSubColIdx * TN + 7] = BTs[(nBase + 7) * BK + dotIdx];
         }
 
-        // Compute outer product
-        #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-            #pragma unroll
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                multiply_dense_k19(wSubRowIdx, wSubColIdx, WNITER,
+                multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
                     regM[wSubRowIdx], regN, threadResults);
             }
         }
     }
 }
-
-// ============================================================================
-// Main Kernel: B-Transpose Sparse
-// ============================================================================
 
 template <const int BM, const int BN, const int BK, const int WM, const int WN,
           const int WNITER, const int TM, const int TN, const int NUM_THREADS>
@@ -119,11 +98,11 @@ __global__ void __launch_bounds__(NUM_THREADS)
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    __shared__ float As[BK * (BM + 1)];  // Padded to avoid bank conflicts
-    __shared__ float BTs[BN * BK];       // B_T tile
+    __shared__ float As[BK * (BM + 1)];
+    __shared__ float BTs[BN * BK];
 
     A += cRow * BM * K;
-    B_T += cCol * BN * K;  // B_T is [N×K], so offset by N rows
+    B_T += cCol * BN * K;
     C += (cRow * BM + warpRow * WM) * N + cCol * BN + warpCol * WN;
 
     const uint innerRowA = threadIdx.x / (BK / 4);
@@ -132,14 +111,15 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-    // Pattern indexed by warp column (which N-block)
     const uint globalWarpCol = cCol * (BN / WN) + warpCol;
-    const int numNBlocks = N / WN;
+    const uint innerRowBT = threadIdx.x / (BK / 4);
+    const uint innerColBT = threadIdx.x % (BK / 4);
+
+    constexpr uint rowStrideBT = NUM_THREADS / (BK / 4);
 
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
-        // Get pattern for this warp's N-rows
         const uint blockId = globalWarpCol * numKBlocks + kBlock;
         const uint8_t pattern = rowPatterns[blockId];
         const uint8_t count = PATTERN_LUT_BK8[pattern].count;
@@ -151,7 +131,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
             continue;
         }
 
-        // Load A tile (column-major with padding, same as K16)
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
                     &A[(innerRowA + offset) * K + innerColA * 4])[0];
@@ -161,16 +140,10 @@ __global__ void __launch_bounds__(NUM_THREADS)
             As[(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
         }
 
-        // Load B_T tile: B_T[N×K] row-major
-        // We load BN rows × BK columns into shared memory
-        // Each thread loads 4 consecutive K elements from one N-row
-        const uint innerRowBT = threadIdx.x / (BK / 4);  // Which N-row (0 to BN-1)
-        const uint innerColBT = threadIdx.x % (BK / 4);  // Which K-column group
-        constexpr uint rowStrideBT = NUM_THREADS / (BK / 4);
 
         for (int32_t offset = 0; offset + rowStrideBT <= BN; offset += rowStrideBT) {
             const float4 tmp = reinterpret_cast<const float4 *>(
-                    &B_T[(innerRowBT + offset) * K + innerColBT * 4])[0];
+                    &B_T[(innerRowBT + offset) * K + bkIdx + innerColBT * 4])[0];
             BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 0] = tmp.x;
             BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 1] = tmp.y;
             BTs[(innerRowBT + offset) * BK + innerColBT * 4 + 2] = tmp.z;
@@ -178,7 +151,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
         }
         __syncthreads();
 
-        // Dispatch based on sparsity count (template instantiation)
         switch (count) {
             case 1:
                 compute_sparse_block_k19<BM, BN, BK, WM, WN, WNITER, TM, TN, 1>(

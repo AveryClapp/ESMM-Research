@@ -77,9 +77,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
         float regM[WMITER * TM];
         float regN[WNITER * TN];
 
-        // KEY DIFFERENCE: Pattern indexed by (kBlock, globalTNBlock)
-        // Each thread group has its own pattern for its 8 columns
-        // WN=32, TN=8 means each warp covers 4 TN-blocks (32/8=4)
         const uint baseGlobalTNBlock = (cCol * BN + warpCol * WN) / TN;
         const int numTNBlocks = N / TN;  // Number of 8-column blocks
 
@@ -107,7 +104,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
             #pragma unroll
             for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
-
                 // Load from shared memory A
                 #pragma unroll
                 for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
@@ -118,22 +114,14 @@ __global__ void __launch_bounds__(NUM_THREADS)
                 // Load from shared memory B
                 #pragma unroll
                 for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                    regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-                    regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-                    regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-                    regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-                    regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-                    regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-                    regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-                    regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol *
-                        WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+                    regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
+                    regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
+                    regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
+                    regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
+                    regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
+                    regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
+                    regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
+                    regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
                 }
 
                 // Compute outer product
@@ -145,13 +133,19 @@ __global__ void __launch_bounds__(NUM_THREADS)
                         const uint globalTNBlock = baseGlobalTNBlock + localTNBlockInWarp;
                         const uint blockId = kBlock * numTNBlocks + globalTNBlock;
                         const uint8_t pattern = blockPatterns[blockId];
-
                         const uint8_t count = PATTERN_LUT_BK8[pattern].count;
                         const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
-
-                        if (count > 0) {
-                            dispatch_multiply(count, wSubRowIdx, wSubColIdx, WNITER,
-                                    regM[wSubRowIdx], regN, threadResults, offsets);
+                        const float regM_val = regM[wSubRowIdx];
+                        
+                        switch (count) {
+                            case 2:
+                                multiply_offsets_2(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsets);
+                            case 4:
+                                multiply_offsets_4(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsets);
+                                break;
+                            default:
+                                multiply_offsets_8(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults);
+                                break;
                         }
                     }
                 }

@@ -88,9 +88,10 @@ __global__ void __launch_bounds__(NUM_THREADS)
 				regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * 
 					WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
 			}
+			#pragma unroll
 			for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+				#pragma unroll
 				for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-					/* switch_table */
 					multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
 					regM[wSubRowIdx], regN, threadResults);
 				}

@@ -37,32 +37,14 @@
 #include "../preprocessors/b_preprocessor_wn.cu"
 #include <cuda_runtime.h>
 
+
 // ============================================================================
-// Shared Memory Transpose: Bs[BK×BN] → Bs_T[BN×BK]
+// Shared Memory Transpose: REMOVED - Now done during load
 // ============================================================================
-
-template <const int BK, const int BN, const int NUM_THREADS>
-__device__ void transpose_shared_memory(
-    const float* __restrict__ Bs,     // [BK][BN] row-major
-    float* __restrict__ Bs_T          // [BN][BK] output
-) {
-    constexpr int TOTAL_ELEMENTS = BK * BN;
-    constexpr int ELEMENTS_PER_THREAD = (TOTAL_ELEMENTS + NUM_THREADS - 1) / NUM_THREADS;
-
-    const int tid = threadIdx.x;
-
-    #pragma unroll
-    for (int i = 0; i < ELEMENTS_PER_THREAD; ++i) {
-        const int flatIdx = tid + i * NUM_THREADS;
-        if (flatIdx < TOTAL_ELEMENTS) {
-            const int k = flatIdx / BN;  // K-position (0..BK-1)
-            const int n = flatIdx % BN;  // N-position (0..BN-1)
-
-            // Transpose: Bs[k][n] → Bs_T[n][k]
-            Bs_T[n * BK + k] = Bs[k * BN + n];
-        }
-    }
-}
+//
+// OPTIMIZATION: We now load B directly into transposed layout during global→shared
+// memory transfer, eliminating the need for a separate transpose pass and one
+// __syncthreads() call. This reduces latency and shared memory usage.
 
 // ============================================================================
 // Sparse Computation: Template specialized on pattern count
@@ -80,6 +62,7 @@ __device__ void compute_sparse_tile_k20(
     constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
     constexpr uint WSUBM = WM / WMITER;
     constexpr uint WSUBN = WN / WNITER;
+    constexpr uint BK_PAD = BK + 1;  // Use padded stride for Bs_T access
 
     float regM[WMITER * TM];
     float regN[WNITER * TN];
@@ -96,30 +79,29 @@ __device__ void compute_sparse_tile_k20(
                 wSubRowIdx * WSUBM + threadRowInWarp * TM];
         }
 
-        // Load from TRANSPOSED B: Bs_T[n][k] format
-        // Bs_T is [BN×BK], so access as Bs_T[n * BK + k]
+        // Load from TRANSPOSED B: Bs_T[n][k] format with padding
+        // Bs_T is [BN×BK_PAD], so access as Bs_T[n * BK_PAD + k]
         #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             const uint nBase = warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN;
 
             // Load 8 elements from Bs_T: columns [nBase..nBase+7], row dotIdx
-            regN[wSubColIdx * TN + 0] = Bs_T[(nBase + 0) * BK + dotIdx];
-            regN[wSubColIdx * TN + 1] = Bs_T[(nBase + 1) * BK + dotIdx];
-            regN[wSubColIdx * TN + 2] = Bs_T[(nBase + 2) * BK + dotIdx];
-            regN[wSubColIdx * TN + 3] = Bs_T[(nBase + 3) * BK + dotIdx];
-            regN[wSubColIdx * TN + 4] = Bs_T[(nBase + 4) * BK + dotIdx];
-            regN[wSubColIdx * TN + 5] = Bs_T[(nBase + 5) * BK + dotIdx];
-            regN[wSubColIdx * TN + 6] = Bs_T[(nBase + 6) * BK + dotIdx];
-            regN[wSubColIdx * TN + 7] = Bs_T[(nBase + 7) * BK + dotIdx];
+            regN[wSubColIdx * TN + 0] = Bs_T[(nBase + 0) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 1] = Bs_T[(nBase + 1) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 2] = Bs_T[(nBase + 2) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 3] = Bs_T[(nBase + 3) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 4] = Bs_T[(nBase + 4) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 5] = Bs_T[(nBase + 5) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 6] = Bs_T[(nBase + 6) * BK_PAD + dotIdx];
+            regN[wSubColIdx * TN + 7] = Bs_T[(nBase + 7) * BK_PAD + dotIdx];
         }
 
-        // Outer product: regM × regN → threadResults
+        // Outer product: regM × regN → threadResults (inlined for efficiency)
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             #pragma unroll
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-                    regM[wSubRowIdx], regN, threadResults);
+                multiply_dense(wSubRowIdx, wSubColIdx, WNITER, regM[wSubRowIdx], regN, threadResults);
             }
         }
     }
@@ -151,11 +133,11 @@ __global__ void __launch_bounds__(NUM_THREADS)
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    // Shared memory: need space for both original and transposed
-    // Alternative: use two separate buffers for clarity
+    // Shared memory: Bs_T uses BK+1 stride to avoid bank conflicts
+    // Bs buffer removed - we load directly into transposed layout
+    constexpr int BK_PAD = BK + 1;
     __shared__ float As[BK * (BM + 1)];
-    __shared__ float Bs[BK * BN];
-    __shared__ float Bs_T[BN * BK];
+    __shared__ float Bs_T[BN * BK_PAD];  // Padded to avoid bank conflicts
 
     A += cRow * BM * K;
     B += cCol * BN;
@@ -202,18 +184,21 @@ __global__ void __launch_bounds__(NUM_THREADS)
             As[(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
         }
 
-        // Load B tile (row-major into shared memory)
+        // Load B tile DIRECTLY into transposed layout (fused load+transpose)
+        // This eliminates one __syncthreads() and the intermediate Bs buffer
         for (int8_t offset = 0; offset + rowStrideB <= BK; offset += rowStrideB) {
-            reinterpret_cast<float4 *>(
-                    &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-                reinterpret_cast<const float4 *>(
-                        &B[(innerRowB + offset) * N + innerColB * 4])[0];
-        }
-        __syncthreads();
+            const int k_idx = innerRowB + offset;
+            // Load 4 consecutive elements from B[k_idx][innerColB*4 .. innerColB*4+3]
+            const float4 tmp = reinterpret_cast<const float4*>(
+                &B[k_idx * N + innerColB * 4])[0];
 
-        // Transpose B in shared memory: Bs[BK×BN] → Bs_T[BN×BK]
-        transpose_shared_memory<BK, BN, NUM_THREADS>(Bs, Bs_T);
-        __syncthreads();
+            // Write transposed: B[k][n] → Bs_T[n][k]
+            Bs_T[(innerColB * 4 + 0) * BK_PAD + k_idx] = tmp.x;
+            Bs_T[(innerColB * 4 + 1) * BK_PAD + k_idx] = tmp.y;
+            Bs_T[(innerColB * 4 + 2) * BK_PAD + k_idx] = tmp.z;
+            Bs_T[(innerColB * 4 + 3) * BK_PAD + k_idx] = tmp.w;
+        }
+        __syncthreads();  // Only ONE sync needed!
 
         // Dispatch based on sparsity count (ONCE per tile, not per K-iteration!)
         switch (count) {
@@ -253,7 +238,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
                     As, Bs_T, threadResults);
                 break;
             case 8:
-            default:
                 compute_sparse_tile_k20<BM, BN, BK, WM, WN, WNITER, TM, TN, 8>(
                     offsets, warpRow, warpCol, threadRowInWarp, threadColInWarp,
                     As, Bs_T, threadResults);

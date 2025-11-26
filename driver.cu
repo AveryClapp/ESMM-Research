@@ -155,6 +155,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_b_smem_transpose_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 21: // ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)
+        if (check_results) {
+            res = run_esmm_b_sparse(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_b_sparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -177,7 +184,7 @@ int main(int argc, char *argv[]) {
     constexpr int rows = 4096;
     constexpr int cols = 4096;
     constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11110000";
+    constexpr std::string_view sparsity = "11000000";
 
     // Default values
     std::vector<int> kernel_choices = {17};
@@ -247,7 +254,20 @@ int main(int argc, char *argv[]) {
         randomize_matrix_unstructured(h_B, inners, cols, random_sparsity_percent, random_seed + 1);
     } else {
         randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-        randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
+        // For B-sparse K-skipping kernels (19, 20, 21), use K-dimension pattern
+        bool use_b_kdim = false;
+        for (size_t i = 0; i < kernel_choices.size(); i++) {
+            int k = kernel_choices[i];
+            if (k == 19 || k == 20 || k == 21) {
+                use_b_kdim = true;
+                break;
+            }
+        }
+        if (use_b_kdim) {
+            randomize_matrix_B_kdim_pattern(h_B, inners, cols, sparsity);
+        } else {
+            randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
+        }
     }
     memset(h_C, 0, rows * cols * sizeof(float));
 

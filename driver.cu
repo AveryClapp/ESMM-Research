@@ -162,6 +162,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_b_sparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 22: // ESMM A+B Sparse (Joint Warp-Uniform Patterns, Zero-Divergence)
+        if (check_results) {
+            res = run_esmm_ab_sparse(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_sparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;

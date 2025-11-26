@@ -29,6 +29,7 @@
 #include "../src/kernels/esmm_btranspose.cu"
 #include "../old_kernels/esmm_joint_precomputed.cu"
 #include "../src/kernels/esmm_b_sparse_wn.cu"
+#include "../src/kernels/esmm_ab_sparse.cu"
 #include "../old_kernels/esmm_joint_1d.cu"
 #include "../src/preprocessors/a_preprocessor_rowlevel.cu"
 #include "../src/preprocessors/joint_preprocessor.cu"
@@ -1280,6 +1281,102 @@ bool run_esmm_b_sparse_no_check(int rows, int cols, int inners, float *d_A,
   }
 
   free_b_pattern_metadata(meta);
+  return true;
+}
+
+// ============================================================================
+// AB-Sparse Joint (K22)
+// ============================================================================
+
+bool run_esmm_ab_sparse(int rows, int cols, int inners, float *d_A, float *d_B,
+                        float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess: analyze both A and B patterns
+  ABPatternMetadata meta = preprocess_ab_patterns<BK, WM, WN>(d_A, d_B, rows, cols, inners);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_ab_sparse<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_ab_pattern_metadata(meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_ab_pattern_metadata(meta);
+  return passed;
+}
+
+bool run_esmm_ab_sparse_no_check(int rows, int cols, int inners, float *d_A,
+                                   float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Preprocess: analyze both A and B patterns
+  ABPatternMetadata meta = preprocess_ab_patterns<BK, WM, WN>(d_A, d_B, rows, cols, inners);
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_ab_sparse<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+  }
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("Kernel time: %.3f ms (avg: %.3f ms)\n", milliseconds, milliseconds / runs);
+
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_ab_pattern_metadata(meta);
+    return false;
+  }
+
+  free_ab_pattern_metadata(meta);
   return true;
 }
 

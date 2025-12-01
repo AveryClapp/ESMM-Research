@@ -153,7 +153,6 @@ def run_ncu_profile(config):
         "--force-overwrite",
         args.executable,
         str(kernel),
-        str(args.runs),
         "--size",
         str(size),
         "--pattern",
@@ -233,9 +232,12 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
             metric_value = parts[14]  # "Metric Value" column
 
             # Extract Duration in microseconds
-            if metric_name == "Duration" and metric_unit == "usecond":
+            if metric_name == "Duration":
+                metric_value = float(metric_value.replace(",", ""))
+                if metric_unit == "msecond":
+                    metric_value *= 1000
                 try:
-                    metrics["kernel_time_us"] = float(metric_value.replace(",", ""))
+                    metrics["kernel_time_us"] = metric_value
                 except:
                     pass
 

@@ -101,10 +101,12 @@ void print_usage(const char* program_name) {
   cout << "    --no-check, -n: Skip result verification (performance-only mode)" << endl;
   cout << "    --check-results, -c: Enable result verification (default)" << endl;
   cout << "    --random, -r: Use random unstructured sparsity (default: pattern-based)" << endl;
+  cout << "    --size <N>, -s <N>: Set matrix dimensions to NxNxN (default: 4096)" << endl;
+  cout << "    --pattern <P>, -p <P>: Set 8-bit sparsity pattern (default: \"11000000\")" << endl;
   cout << "    --help, -h: Show this help message" << endl;
   cout << endl;
   cout << "Sparsity Modes:" << endl;
-  cout << "  Pattern-based (default): Uses repeating pattern \"11110000\" (50% sparsity)" << endl;
+  cout << "  Pattern-based (default): Uses repeating 8-bit pattern \"11000000\" (25% sparsity)" << endl;
   cout << "  Random (--random, -r): Uses truly random unstructured sparsity (50% default)" << endl;
   cout << endl;
   cout << "Examples:" << endl;
@@ -113,6 +115,8 @@ void print_usage(const char* program_name) {
   cout << "  " << program_name << " all 1 -v -n" << endl;
   cout << "  " << program_name << " 13 1 --random --verbose  # Test with random sparsity" << endl;
   cout << "  " << program_name << " 10 5 -r -v  # Short form with random sparsity" << endl;
+  cout << "  " << program_name << " 17 1 --size 2048 --pattern 10101010  # Custom size and pattern" << endl;
+  cout << "  " << program_name << " 22 5 -s 8192 -p 11110000 -v  # 50% sparsity, 8192x8192" << endl;
 }
 
 

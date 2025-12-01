@@ -194,11 +194,11 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
 
 int main(int argc, char *argv[]) {
 
-    // Define Matrix Dims
-    constexpr int rows = 4096;
-    constexpr int cols = 4096;
-    constexpr int inners = 4096;
-    constexpr std::string_view sparsity = "11000000";
+    // Default Matrix Dims
+    int rows = 4096;
+    int cols = 4096;
+    int inners = 4096;
+    std::string sparsity = "11000000";
 
     // Default values
     std::vector<int> kernel_choices = {17};
@@ -220,6 +220,36 @@ int main(int argc, char *argv[]) {
             check_results = false;
         } else if (arg == "--random" || arg == "-r") {
             use_random_sparsity = true;
+        } else if (arg == "--size" || arg == "-s") {
+            if (i + 1 >= argc) {
+                cout << "Error: --size requires an argument" << endl;
+                print_usage(argv[0]);
+                return 1;
+            }
+            int size = atoi(argv[++i]);
+            if (size <= 0) {
+                cout << "Error: Size must be positive" << endl;
+                return 1;
+            }
+            rows = cols = inners = size;
+        } else if (arg == "--pattern" || arg == "-p") {
+            if (i + 1 >= argc) {
+                cout << "Error: --pattern requires an argument" << endl;
+                print_usage(argv[0]);
+                return 1;
+            }
+            sparsity = argv[++i];
+            // Validate pattern
+            if (sparsity.length() != 8) {
+                cout << "Error: Pattern must be exactly 8 characters (e.g., '11000000')" << endl;
+                return 1;
+            }
+            for (char c : sparsity) {
+                if (c != '0' && c != '1') {
+                    cout << "Error: Pattern must contain only '0' and '1' characters" << endl;
+                    return 1;
+                }
+            }
         } else if (i == 1) {
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
                 kernel_choices = parse_kernel_selection(arg);

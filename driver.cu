@@ -169,6 +169,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_sparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 23: // ESMM AB-Turbo (Precomputed Joint Patterns + Warp Shuffle)
+        if (check_results) {
+            res = run_esmm_ab_turbo(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_turbo_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -261,11 +268,11 @@ int main(int argc, char *argv[]) {
         randomize_matrix_unstructured(h_B, inners, cols, random_sparsity_percent, random_seed + 1);
     } else {
         randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-        // For B-sparse K-skipping kernels (19, 20, 21), use K-dimension pattern
+        // For B-sparse K-skipping kernels (19, 20, 21, 22, 23), use K-dimension pattern
         bool use_b_kdim = false;
         for (size_t i = 0; i < kernel_choices.size(); i++) {
             int k = kernel_choices[i];
-            if (k == 19 || k == 20 || k == 21) {
+            if (k == 19 || k == 20 || k == 21 || k == 22 || k == 23) {
                 use_b_kdim = true;
                 break;
             }

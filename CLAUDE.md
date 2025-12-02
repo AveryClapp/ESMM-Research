@@ -298,3 +298,259 @@ When presented with a kernel performance issue:
 ---
 
 Remember: **The best optimization is the one you don't have to do.** Start simple, measure, and only optimize what matters.
+
+## Benchmarking Infrastructure
+
+### Parallel Benchmark Runner (scripts/benchmark.py)
+
+**Purpose:** Automate NCU profiling across multiple matrix sizes and sparsity patterns with proper cold-start handling.
+
+**Key Features:**
+- Parallel execution of NCU profiles (configurable concurrency)
+- Cold-start mode with CUDA cache clearing and GPU reset
+- Automated metric extraction (kernel time, memory throughput, compute throughput)
+- Preprocessing kernel tracking (separate from main kernel metrics)
+- CSV summary generation with end-to-end timing
+
+**Usage Patterns:**
+```bash
+# Single kernel, default sizes (1024, 2048, 4096), default sparsity patterns
+./scripts/benchmark.py --kernel 17
+
+# Multiple kernels, custom sizes, parallel execution
+./scripts/benchmark.py -k 17,22,23 --sizes 1024,2048 --parallel 2
+
+# Cold-start measurements (matches manual profiling runs)
+./scripts/benchmark.py -k 17 --cold-start
+
+# Custom sparsity patterns
+./scripts/benchmark.py -k 17 --sparsity 11111111,10101010,11110000
+```
+
+**Default Sparsity Patterns:**
+- `100pct` (11111111): 100% density - baseline dense performance
+- `50pct` (11110000): 50% density - typical sparse workload
+- `25pct` (11000000): 25% density - high sparsity
+- `12pct` (10000000): 12.5% density - extreme sparsity
+
+**Cold-Start Mode:**
+- Clears CUDA JIT cache (`~/.nv/ComputeCache`) between runs
+- Optional GPU reset (`nvidia-smi -r`) for true cold-start
+- Optional driver unload/reload (nuclear option, risky)
+- Configurable reset delay (default 2.0s)
+
+**Why Cold-Start Matters:**
+- JIT compilation can cache kernels between runs
+- First run includes compile time, subsequent runs don't
+- Cold-start mode ensures consistent, reproducible measurements
+- **Use `--cold-start` when comparing against manual `ncu` runs**
+
+**Output Structure:**
+```
+benchmarks/
+  YYYY-MM-DD_HHMMSS_k17_coldstart/
+    k17_1024_100pct.ncu-rep
+    k17_1024_50pct.ncu-rep
+    k17_2048_100pct.ncu-rep
+    ...
+    summary.csv  # Consolidated metrics
+```
+
+**CSV Format:**
+- Header indicates cold-start mode status
+- Preprocessing kernels listed once per size (kernel="PREPROCESS")
+- Main kernel times include preprocessing overhead
+- Columns: kernel, size, sparsity, pattern, kernel_time_us, memory_throughput_pct, compute_throughput_pct, ncu_report, kernel_name
+
+**Metric Extraction:**
+- Uses `ncu --import <file> --csv --page details` to parse .ncu-rep files
+- Extracts: Duration (µs), Memory Throughput (%), Compute Throughput (%)
+- Automatically detects preprocessing kernels (any kernel with "preprocess" in name)
+- Sums preprocessing time and adds to main kernel for end-to-end timing
+
+**Best Practices:**
+1. Use `--cold-start` for reproducible benchmarks
+2. Use `--parallel 1` with cold-start (GPU reset affects all GPUs)
+3. Compare against cuBLAS/cuSPARSE baselines when available
+4. Check both memory and compute throughput to identify bottleneck
+5. Run multiple times and take median for statistical significance
+
+**Common Pitfalls:**
+- Parallel > 1 with cold-start → inconsistent results (GPU reset affects all)
+- Forgetting `--cold-start` → JIT cache makes results unrealistic
+- Not accounting for preprocessing time → misleading kernel performance
+- Trusting single runs → noise from OS scheduling, thermal throttling
+
+**Integration with ESMM Experiments:**
+- All kernels accept `--size` and `--pattern` flags
+- Pattern is 8-bit binary string (e.g., "11110000" for 50% B-sparsity)
+- Use `--no-check` flag to skip verification for speed
+- Executable path defaults to `./exec_dev` (development build)
+
+## B-Sparsity Implementation Architecture
+
+### Pattern-Specialized Dispatch Mechanism
+
+**Core Concept:** For BK=8 block sizes, each row can have 256 possible sparsity patterns (8 bits). Instead of runtime branching to check which elements to compute, we precompile 256 specialized functions - one per pattern - with zero branches.
+
+**Implementation Components:**
+
+1. **Pattern Functions** (`include/pattern_functions_bk8.cuh`):
+   - 6 hand-optimized functions for common patterns (15, 128, 192, 240, 252, 255)
+   - 1 generic fallback function for remaining 250 patterns
+   - Each function has completely unrolled loops for active columns only
+   - Zero runtime branches - all control flow determined at compile time
+
+2. **Pattern LUT** (`include/pattern_lut.cuh`):
+   - Constant memory lookup table (1.25 KB)
+   - For each pattern: count of set bits + indices of active columns
+   - Used by generic fallback function
+   - Enables runtime pattern interpretation when specialized function doesn't exist
+
+3. **Dispatch Function** (`dispatch_pattern` in pattern_functions_bk8.cuh):
+   - Switch statement over pattern value
+   - All threads in warp have same pattern → zero divergence
+   - Falls back to generic for unhandled patterns
+
+**Performance Characteristics:**
+
+**Theoretical Overhead:**
+- Switch statement: ~1-2 cycles (predictable branch)
+- Function call: Inlined by compiler (zero overhead)
+- Pattern read: Cached in registers/shared memory
+- **Total dispatch overhead: ~1-5 cycles amortized across entire warp**
+
+**Actual Performance Depends On:**
+1. **Pattern distribution:** Skewed toward 6 specialized patterns → fast path dominates
+2. **Fallback frequency:** Uniform distribution → 250/256 = 97.6% use generic path
+3. **Warp divergence:** ALL threads in warp have same pattern (warp-level mask) → zero divergence
+4. **I-cache pressure:** 256 possible code paths → potential cache thrashing
+
+**Cost-Benefit Analysis:**
+
+**Benefits (when profitable):**
+- Zero innerloop branches for specialized patterns
+- Compiler can fully unroll and optimize each pattern
+- Predictable performance for common patterns (100%, 50%, 25%, 12.5% density)
+
+**Costs (potential overhead):**
+- Switch statement dispatch (~1-5 cycles)
+- I-cache pollution from multiple code paths
+- Generic fallback has branch per column (8 branches per warp)
+- Function pointer dispatch vs direct call overhead
+
+### Experiment: Isolating Innerloop Branching Overhead
+
+**Research Question:** How much performance overhead does the pattern dispatch mechanism (switch + function calls) add compared to:
+1. Direct innerloop with branches (baseline)
+2. Direct call to specialized function (no dispatch)
+3. Function pointer LUT dispatch (alternative approach)
+
+**Hypothesis:**
+- Dispatch overhead should be **<1% of total kernel time** for large matrices (>2048)
+- For small matrices, dispatch overhead could be **5-10%** due to less compute amortization
+- Pattern distribution affects overhead: uniform → more fallback → more branches
+
+**Experimental Design:**
+
+**Kernels to Compare:**
+1. **K_DIRECT_BRANCH**: Innerloop with `if ((pattern >> col) & 1)` branches (baseline)
+2. **K_DISPATCH_SWITCH**: Current implementation with `dispatch_pattern()` switch statement
+3. **K_DISPATCH_FUNCPTR**: Function pointer LUT `void (*compute[256])(...); compute[pattern](...)`
+4. **K_DIRECT_CALL**: Hardcoded call to `compute_pattern_240()` for 50% density pattern (upper bound)
+5. **K_GENERIC_ONLY**: Always call generic fallback (lower bound for dispatch)
+
+**Variables to Control:**
+- **Matrix size:** 1024, 2048, 4096, 8192 (vary compute-to-dispatch ratio)
+- **Pattern type:**
+  - `11110000` (240) - specialized function exists
+  - `10101010` (170) - no specialized function, uses generic
+  - `11111111` (255) - dense baseline
+  - `10000000` (128) - extreme sparsity (1 column)
+- **Pattern distribution:**
+  - Uniform: All rows same pattern (best case)
+  - Random: Mix of patterns (realistic case)
+  - Adversarial: Worst-case I-cache thrashing
+
+**Metrics to Collect:**
+1. **Kernel time** (µs) - primary metric
+2. **Memory throughput** (% peak) - identify if memory-bound
+3. **Compute throughput** (% peak) - identify if compute-bound
+4. **Branch efficiency** (from `ncu --metrics branch_efficiency`)
+5. **Instruction cache hit rate** (from `ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum`)
+
+**Expected Outcomes:**
+
+**For 50% density pattern (11110000 = 240):**
+```
+Baseline (K_DIRECT_BRANCH):     1000 µs (8 branches per K-block)
+Current (K_DISPATCH_SWITCH):    1005 µs (~0.5% overhead from switch)
+FuncPtr (K_DISPATCH_FUNCPTR):   1008 µs (~0.8% overhead from indirect call)
+Direct (K_DIRECT_CALL):         1003 µs (~0.3% overhead from direct call)
+Generic (K_GENERIC_ONLY):       1050 µs (~5% overhead from 8 branches)
+```
+
+**For random pattern (10101010 = 170, uses generic):**
+```
+Baseline (K_DIRECT_BRANCH):     1000 µs
+Current (K_DISPATCH_SWITCH):    1050 µs (~5% overhead, uses generic fallback)
+FuncPtr (K_DISPATCH_FUNCPTR):   1055 µs (~5.5% overhead)
+Direct (K_DIRECT_CALL):         N/A (not applicable)
+Generic (K_GENERIC_ONLY):       1050 µs (same as dispatch → switch cost negligible)
+```
+
+**Analysis Plan:**
+
+1. **Dispatch Overhead Calculation:**
+   ```
+   dispatch_overhead = (K_DISPATCH_SWITCH - K_DIRECT_CALL) / K_DIRECT_CALL * 100%
+   ```
+
+2. **Fallback Cost:**
+   ```
+   fallback_cost = (K_GENERIC_ONLY - K_DIRECT_CALL) / K_DIRECT_CALL * 100%
+   ```
+
+3. **Break-Even Analysis:**
+   - At what matrix size does dispatch overhead drop below 1%?
+   - At what sparsity level does pattern specialization pay off?
+
+4. **Sensitivity Analysis:**
+   - How does pattern distribution (uniform vs random) affect overhead?
+   - Does I-cache thrashing occur with adversarial patterns?
+
+**Decision Criteria:**
+
+**Keep current dispatch if:**
+- Overhead < 2% for typical workloads (>2048, 50% sparsity)
+- Specialized patterns show >10% speedup vs generic
+- I-cache effects are negligible
+
+**Switch to simpler approach if:**
+- Overhead > 5% consistently
+- Generic fallback performs within 2% of specialized
+- Function pointer LUT is faster (unlikely but possible)
+
+**Abandon dispatch entirely if:**
+- Direct branch approach is within 1% (branches are free)
+- Dispatch complexity outweighs benefits
+
+**Implementation Notes:**
+
+**Quick Test:**
+```bash
+# Run experiment for 50% density pattern
+./scripts/benchmark.py -k K_DIRECT_BRANCH,K_DISPATCH_SWITCH,K_DIRECT_CALL \
+  --sizes 1024,2048,4096 \
+  --sparsity 11110000 \
+  --cold-start
+
+# Compare kernel times in summary.csv
+# Expected: <1% difference for 4096x4096
+```
+
+**Why This Experiment Matters:**
+- B-sparsity dispatch is in the critical path (executed every K-block)
+- Small overheads (1-2%) compound across millions of warps
+- Validates architectural decision: is complexity worth the benefit?
+- Informs future optimizations: focus on dispatch or focus on innerloop?

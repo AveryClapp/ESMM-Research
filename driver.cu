@@ -268,6 +268,15 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Validate all kernel choices are in valid range (1-23)
+    for (int k : kernel_choices) {
+        if (k < 1 || k > 23) {
+            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-23." << endl;
+            cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
+            return 1;
+        }
+    }
+
     if (verbose) {
         cout << "Matrix dimensions: " << rows << "x" << cols << " * " << cols << "x" << inners << endl;
         cout << "Number of runs per kernel: " << runs << endl;

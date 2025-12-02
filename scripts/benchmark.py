@@ -8,6 +8,7 @@ Generates organized .ncu-rep files and consolidated CSV with key metrics.
 Usage:
     ./scripts/benchmark.py --kernel 17
     ./scripts/benchmark.py -k 17,22,23 --sizes 1024,2048 --parallel 2
+    ./scripts/benchmark.py -k 17 --cold-start  # For cold-start measurements
 """
 
 import argparse
@@ -16,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +41,7 @@ Examples:
   %(prog)s --kernel 17
   %(prog)s -k 17,22,23 --sizes 1024,2048 --parallel 2
   %(prog)s -k 17 --sparsity 11111111,10101010 --output my_experiment
+  %(prog)s -k 17 --cold-start  # Cold-start measurements (matches manual runs)
         """,
     )
 
@@ -88,6 +91,22 @@ Examples:
         default="gpu__time_duration.sum,dram__throughput.avg.pct_of_peak_sustained_elapsed,sm__throughput.avg.pct_of_peak_sustained_elapsed",
         help="NCU metrics to collect (comma-separated)",
     )
+    parser.add_argument(
+        "--cold-start",
+        action="store_true",
+        help="Reset GPU between runs for cold-start measurements (slower but accurate, matches manual runs)",
+    )
+    parser.add_argument(
+        "--reset-delay",
+        type=float,
+        default=2.0,
+        help="Delay in seconds after GPU reset (default: 2.0)",
+    )
+    parser.add_argument(
+        "--unload-driver",
+        action="store_true",
+        help="Unload/reload NVIDIA driver between runs (VERY slow, but guarantees cold-start)",
+    )
 
     return parser.parse_args()
 
@@ -130,11 +149,131 @@ def create_output_dir(args, kernels):
     else:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         kernel_str = "k" + "_".join(map(str, kernels))
-        dirname = f"{timestamp}_{kernel_str}"
+        mode_suffix = "_coldstart" if args.cold_start else ""
+        dirname = f"{timestamp}_{kernel_str}{mode_suffix}"
 
     output_dir = Path("benchmarks") / dirname
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+
+
+def clear_cuda_cache():
+    """Clear CUDA JIT compilation cache to ensure cold-start"""
+    import shutil
+
+    cache_paths = [
+        Path.home() / ".nv" / "ComputeCache",
+        Path(os.environ.get("CUDA_CACHE_PATH", "/nonexistent")),
+    ]
+
+    cleared = False
+    for cache_path in cache_paths:
+        if cache_path.exists() and cache_path.is_dir():
+            try:
+                # Remove and recreate to clear cache
+                shutil.rmtree(cache_path)
+                cache_path.mkdir(parents=True, exist_ok=True)
+                print(f"[Cache] Cleared {cache_path}")
+                cleared = True
+            except Exception as e:
+                print(f"[Warning] Could not clear cache at {cache_path}: {e}")
+
+    return cleared
+
+
+def unload_reload_driver(delay=5.0):
+    """Unload and reload NVIDIA driver - nuclear option for cold-start
+
+    WARNING: This is risky and may fail. Only use if absolutely necessary.
+    """
+    try:
+        # Check if any processes are using the GPU
+        print("[Driver] Checking for GPU processes...")
+        check_result = subprocess.run(
+            ["sudo", "fuser", "-v", "/dev/nvidia*"],
+            capture_output=True,
+            text=True,
+        )
+
+        # fuser exits with 1 if no processes found (which is what we want)
+        if check_result.returncode == 0:
+            print("[Warning] GPU is in use by other processes. Skipping driver reload.")
+            print(f"[Warning] Processes: {check_result.stdout}")
+            return False
+
+        # Try to unload all nvidia modules in correct order
+        print("[Driver] Unloading NVIDIA driver modules...")
+        modules_to_unload = ["nvidia_uvm", "nvidia_drm", "nvidia_modeset", "nvidia"]
+
+        for module in modules_to_unload:
+            result = subprocess.run(
+                ["sudo", "modprobe", "-r", module],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            # Ignore errors - some modules might not be loaded
+            if result.returncode == 0:
+                print(f"[Driver] Unloaded {module}")
+
+        time.sleep(2)
+
+        # Reload driver modules
+        print("[Driver] Reloading NVIDIA driver modules...")
+        result = subprocess.run(
+            ["sudo", "modprobe", "nvidia"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode != 0:
+            print(f"[ERROR] Failed to reload nvidia module: {result.stderr}")
+            return False
+
+        # Wait for driver to initialize
+        time.sleep(delay)
+
+        # Verify driver is working
+        verify = subprocess.run(
+            ["nvidia-smi"],
+            capture_output=True,
+            timeout=10,
+        )
+
+        if verify.returncode == 0:
+            print("[Driver] Driver reloaded successfully")
+            return True
+        else:
+            print("[ERROR] Driver loaded but nvidia-smi failed")
+            return False
+
+    except Exception as e:
+        print(f"[ERROR] Driver reload failed: {e}")
+        print("[ERROR] You may need to manually reload the driver or reboot")
+        return False
+
+
+def reset_gpu(delay=2.0):
+    """Reset GPU hardware state (optional, may not work on all systems)"""
+    try:
+        result = subprocess.run(
+            ["sudo", "nvidia-smi", "-r"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            # This is expected to fail on many EC2 instances
+            return False
+
+        # Wait for reset to complete
+        time.sleep(delay)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception as e:
+        return False
 
 
 def run_ncu_profile(config):
@@ -164,6 +303,19 @@ def run_ncu_profile(config):
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+        # Clear caches if cold-start mode enabled
+        if args.cold_start:
+            # Clear CUDA JIT cache (this is the critical one)
+            clear_cuda_cache()
+
+            if args.unload_driver:
+                # Nuclear option: unload/reload driver
+                unload_reload_driver()
+            else:
+                # Try GPU reset (may fail on EC2, but worth trying)
+                reset_gpu(args.reset_delay)
+
         print(f"[Done] Kernel {kernel}, Size {size}, Sparsity {sparsity_label}")
         return {
             "success": True,
@@ -186,7 +338,13 @@ def run_ncu_profile(config):
 
 
 def extract_metrics_from_report(ncu_rep_file, metrics_list):
-    """Extract metrics from .ncu-rep file using ncu --import"""
+    """Extract metrics from .ncu-rep file using ncu --import
+
+    Returns dict with:
+        - main_kernel: {kernel_time_us, memory_throughput_pct, compute_throughput_pct}
+        - preprocess_kernels: list of {kernel_name, kernel_time_us, memory_throughput_pct, compute_throughput_pct}
+        - total_preprocess_time_us: sum of all preprocessing kernel times
+    """
     try:
         cmd = [
             "sudo",
@@ -205,7 +363,10 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
         if len(lines) < 2:
             return None
 
-        metrics = {}
+        main_metrics = {}
+        # Track each preprocessing kernel separately by kernel name
+        preprocess_kernels = {}
+
         for line in lines[1:]:  # Skip header
             if not line.strip():
                 continue
@@ -227,9 +388,21 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
             if len(parts) < 15:
                 continue
 
+            kernel_name = parts[4]  # "Kernel Name" column
             metric_name = parts[12]  # "Metric Name" column
             metric_unit = parts[13]  # "Metric Unit" column
             metric_value = parts[14]  # "Metric Value" column
+
+            # Determine if this is a preprocessing kernel (any kernel with "preprocess" in name)
+            is_preprocess = "preprocess" in kernel_name.lower()
+
+            if is_preprocess:
+                # Create entry for this preprocessing kernel if not exists
+                if kernel_name not in preprocess_kernels:
+                    preprocess_kernels[kernel_name] = {"kernel_name": kernel_name}
+                target_metrics = preprocess_kernels[kernel_name]
+            else:
+                target_metrics = main_metrics
 
             # Extract Duration in microseconds
             if metric_name == "Duration":
@@ -237,14 +410,14 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
                 if metric_unit == "msecond":
                     metric_value *= 1000
                 try:
-                    metrics["kernel_time_us"] = metric_value
+                    target_metrics["kernel_time_us"] = metric_value
                 except:
                     pass
 
             # Extract Memory Throughput percentage
             elif metric_name == "Memory Throughput" and metric_unit == "%":
                 try:
-                    metrics["memory_throughput_pct"] = float(
+                    target_metrics["memory_throughput_pct"] = float(
                         metric_value.replace(",", "")
                     )
                 except:
@@ -253,25 +426,47 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
             # Extract Compute (SM) Throughput percentage
             elif metric_name == "Compute (SM) Throughput" and metric_unit == "%":
                 try:
-                    metrics["compute_throughput_pct"] = float(
+                    target_metrics["compute_throughput_pct"] = float(
                         metric_value.replace(",", "")
                     )
                 except:
                     pass
 
-        return metrics
+        # Calculate total preprocessing time
+        total_preprocess_time = sum(
+            kernel.get("kernel_time_us", 0.0)
+            for kernel in preprocess_kernels.values()
+        )
+
+        return {
+            "main_kernel": main_metrics if main_metrics else None,
+            "preprocess_kernels": list(preprocess_kernels.values()) if preprocess_kernels else [],
+            "total_preprocess_time_us": total_preprocess_time,
+        }
 
     except subprocess.CalledProcessError as e:
         print(f"Warning: Could not extract metrics from {ncu_rep_file}: {e.stderr}")
         return None
 
 
-def generate_summary_csv(results, output_dir):
-    """Generate summary CSV from all results"""
+def generate_summary_csv(results, output_dir, cold_start_mode):
+    """Generate summary CSV from all results
+
+    Includes preprocessing time once per matrix size (not per kernel)
+    AND adds preprocessing time to kernel time for total end-to-end time
+    """
     csv_path = output_dir / "summary.csv"
+
+    # Track preprocessing time per size for adding to kernel times
+    preprocess_time_by_size = {}
+    preprocess_reported = {}
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
+
+        # Add metadata header
+        writer.writerow([f"# Cold-start mode: {'enabled' if cold_start_mode else 'disabled'}"])
+
         writer.writerow(
             [
                 "kernel",
@@ -282,6 +477,7 @@ def generate_summary_csv(results, output_dir):
                 "memory_throughput_pct",
                 "compute_throughput_pct",
                 "ncu_report",
+                "kernel_name",
             ]
         )
 
@@ -292,29 +488,96 @@ def generate_summary_csv(results, output_dir):
             # Extract metrics from .ncu-rep file
             metrics = extract_metrics_from_report(result["output_file"], [])
 
-            if metrics:
+            if not metrics:
+                # No metrics extracted
                 writer.writerow(
                     [
                         result["kernel"],
                         result["size"],
                         result["sparsity_label"],
                         result["sparsity_pattern"],
+                        "N/A",
+                        "N/A",
+                        "N/A",
+                        result["output_file"].name,
+                        "",
+                    ]
+                )
+                continue
+
+            # Cache total preprocessing time per size
+            size = result["size"]
+            total_preprocess_time = metrics.get("total_preprocess_time_us", 0.0)
+            preprocess_kernels = metrics.get("preprocess_kernels", [])
+
+            if total_preprocess_time > 0 and size not in preprocess_time_by_size:
+                preprocess_time_by_size[size] = total_preprocess_time
+
+            # Write preprocessing entries once per size (all preprocessing kernels)
+            if preprocess_kernels and size not in preprocess_reported:
+                preprocess_reported[size] = True
+
+                # Write each preprocessing kernel separately
+                for preproc in preprocess_kernels:
+                    writer.writerow(
+                        [
+                            "PREPROCESS",  # Special kernel ID
+                            size,
+                            result["sparsity_label"],
+                            result["sparsity_pattern"],
+                            (
+                                f"{preproc.get('kernel_time_us', 'N/A'):.3f}"
+                                if isinstance(preproc.get("kernel_time_us"), float)
+                                else "N/A"
+                            ),
+                            (
+                                f"{preproc.get('memory_throughput_pct', 'N/A'):.2f}"
+                                if isinstance(preproc.get("memory_throughput_pct"), float)
+                                else "N/A"
+                            ),
+                            (
+                                f"{preproc.get('compute_throughput_pct', 'N/A'):.2f}"
+                                if isinstance(preproc.get("compute_throughput_pct"), float)
+                                else "N/A"
+                            ),
+                            result["output_file"].name,
+                            preproc.get("kernel_name", ""),  # Actual preprocessing kernel name
+                        ]
+                    )
+
+            # Write main kernel metrics (with preprocessing time added if applicable)
+            main = metrics.get("main_kernel")
+            if main:
+                # Get kernel time and add preprocessing if it exists for this size
+                kernel_time = main.get("kernel_time_us")
+                if isinstance(kernel_time, float) and size in preprocess_time_by_size:
+                    # Add preprocessing time to kernel time for total end-to-end time
+                    total_time = kernel_time + preprocess_time_by_size[size]
+                    kernel_time_str = f"{total_time:.3f}"
+                elif isinstance(kernel_time, float):
+                    kernel_time_str = f"{kernel_time:.3f}"
+                else:
+                    kernel_time_str = "N/A"
+
+                writer.writerow(
+                    [
+                        result["kernel"],
+                        result["size"],
+                        result["sparsity_label"],
+                        result["sparsity_pattern"],
+                        kernel_time_str,
                         (
-                            f"{metrics.get('kernel_time_us', 'N/A'):.3f}"
-                            if isinstance(metrics.get("kernel_time_us"), float)
+                            f"{main.get('memory_throughput_pct', 'N/A'):.2f}"
+                            if isinstance(main.get("memory_throughput_pct"), float)
                             else "N/A"
                         ),
                         (
-                            f"{metrics.get('memory_throughput_pct', 'N/A'):.2f}"
-                            if isinstance(metrics.get("memory_throughput_pct"), float)
-                            else "N/A"
-                        ),
-                        (
-                            f"{metrics.get('compute_throughput_pct', 'N/A'):.2f}"
-                            if isinstance(metrics.get("compute_throughput_pct"), float)
+                            f"{main.get('compute_throughput_pct', 'N/A'):.2f}"
+                            if isinstance(main.get("compute_throughput_pct"), float)
                             else "N/A"
                         ),
                         result["output_file"].name,
+                        "",  # No kernel_name for main kernels (could add if needed)
                     ]
                 )
             else:
@@ -328,6 +591,7 @@ def generate_summary_csv(results, output_dir):
                         "N/A",
                         "N/A",
                         result["output_file"].name,
+                        "",
                     ]
                 )
 
@@ -343,9 +607,22 @@ def main():
     sizes = parse_size_list(args.sizes)
     sparsity_patterns = parse_sparsity_patterns(args.sparsity)
 
+    # Warn if cold-start + parallel > 1
+    if args.cold_start and args.parallel > 1:
+        print("[Warning] Cold-start mode with parallel > 1 may have inconsistent results")
+        print("[Warning] GPU reset affects ALL GPUs, not just the one running the kernel")
+        print("[Warning] Consider using --parallel 1 for cold-start benchmarks\n")
+
     # Create output directory
     output_dir = create_output_dir(args, kernels)
-    print(f"Output directory: {output_dir}\n")
+    print(f"Output directory: {output_dir}")
+    print(f"Cold-start mode: {'ENABLED' if args.cold_start else 'DISABLED'}")
+    if args.cold_start:
+        print(f"Reset delay: {args.reset_delay}s")
+        # Clear cache BEFORE first run for true cold-start
+        print("\n[Initializing] Clearing CUDA cache for cold-start...")
+        clear_cuda_cache()
+    print()
 
     # Generate all configurations
     configs = []
@@ -374,7 +651,7 @@ def main():
     # Generate summary CSV
     print("\n" + "=" * 60)
     print("Extracting metrics from reports...")
-    csv_path = generate_summary_csv(results, output_dir)
+    csv_path = generate_summary_csv(results, output_dir, args.cold_start)
 
     # Print summary
     successful = sum(1 for r in results if r["success"])
@@ -386,6 +663,7 @@ def main():
     print(f"  Failed: {failed}/{len(results)}")
     print(f"  Output: {output_dir}")
     print(f"  CSV Summary: {csv_path}")
+    print(f"  Cold-start: {'YES' if args.cold_start else 'NO'}")
     print("=" * 60)
 
     return 0 if failed == 0 else 1

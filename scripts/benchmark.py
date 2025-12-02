@@ -407,8 +407,11 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
             # Extract Duration in microseconds
             if metric_name == "Duration":
                 metric_value = float(metric_value.replace(",", ""))
-                if metric_unit == "msecond":
-                    metric_value *= 1000
+                if metric_unit == "second":
+                    metric_value *= 1_000_000  # Convert seconds to microseconds
+                elif metric_unit == "msecond":
+                    metric_value *= 1000  # Convert milliseconds to microseconds
+                # else: already in microseconds ("usecond")
                 try:
                     target_metrics["kernel_time_us"] = metric_value
                 except:

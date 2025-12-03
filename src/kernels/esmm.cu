@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../../include/utils.cuh"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -18,15 +17,15 @@ __global__ void __launch_bounds__(NUM_THREADS)
 	const uint cRow = blockIdx.y;
 	const uint cCol = blockIdx.x;
 
-	const uint warpIdx = threadIdx.x / WARPSIZE;
+	const uint warpIdx = threadIdx.x / 32;
 	const uint warpCol = warpIdx % (BN / WN);
 	const uint warpRow = warpIdx / (BN / WN);
 
-	constexpr uint WMITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+	constexpr uint WMITER = (WM * WN) / (32 * TM * TN * WNITER);
 	constexpr uint WSUBM = WM / WMITER;
 	constexpr uint WSUBN = WN / WNITER; 
 
-	const uint threadIdxInWarp = threadIdx.x % WARPSIZE;
+	const uint threadIdxInWarp = threadIdx.x % 32;
 	const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN); 
 	const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN); 
 

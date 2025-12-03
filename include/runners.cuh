@@ -1496,13 +1496,13 @@ bool run_esmm_ab_turbo_no_check(int rows, int cols, int inners, float *d_A,
 
 bool run_esmm_ab_sparse_optimized(int rows, int cols, int inners, float *d_A, float *d_B,
                                     float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint NUM_THREADS = 128;
+  const uint NUM_THREADS = 256;
   const uint BN = 128;
   const uint BM = 64;
   const uint BK = 8;
   const uint WN = 32;
-  const uint WM = 64;
-  const uint WNITER = 2;
+  const uint WM = 32;
+  const uint WNITER = 1;
   const uint TN = 8;
   const uint TM = 1;
 

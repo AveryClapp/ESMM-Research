@@ -204,7 +204,6 @@ __global__ void preprocess_ab_b_patterns_kernel(
 
         uint8_t threadPattern = 0;
 
-        // WN×BK = 32×8 = 256 elements per block
         constexpr int ELEMENTS_PER_THREAD = (WN * BK) / WARP_SIZE;
 
         #pragma unroll

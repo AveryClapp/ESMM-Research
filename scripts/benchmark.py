@@ -429,6 +429,7 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
                     pass
 
             # Extract Memory Throughput percentage
+            """
             elif metric_name == "Memory Throughput" and metric_unit == "%":
                 try:
                     target_metrics["memory_throughput_pct"] = float(
@@ -445,6 +446,7 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
                     )
                 except:
                     pass
+            """
 
         # Calculate total preprocessing time
         total_preprocess_time = sum(

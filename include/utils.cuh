@@ -13,9 +13,6 @@
 using std::cout;
 using std::endl;
 
-
-// Forward decl - removed with old preprocessors
-// bool verify_preprocess_a(float* d_A, int rows, int cols, int inners, int runs, bool check);
 struct PreprocessResult {
   int* d_list;
   int* h_list;
@@ -372,11 +369,11 @@ std::vector<int> stringToVector(const std::string &str) {
   return vec;
 }
 
-// CPU implementation of matrix multiplication for verification
+
 void matrixMultiplyCPU(const float *A, const float *B, float *C, int M, int N,
     int K) {
   for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+   for (int j = 0; j < N; j++) {
       float sum = 0.0f;
       for (int k = 0; k < K; k++) {
         sum += A[i * K + k] * B[k * N + j];

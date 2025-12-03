@@ -71,6 +71,7 @@ __global__ void preprocess_b_patterns_kernel(
 
         uint8_t threadPattern = 0;
 
+        // 16 iff WN == 64, 8 if WN == 32
         constexpr int ELEMENTS_PER_THREAD = (WN * BK) / WARP_SIZE;
 
         #pragma unroll

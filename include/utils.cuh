@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 24; i++) {
+    for (int i = 1; i <= 27; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 24; i++) {
+    for (int i = start; i <= end && i <= 27; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -92,23 +92,28 @@ void print_usage(const char* program_name) {
   cout << "  0b, --preprocess-b    Run B matrix preprocessing verification" << endl;
   cout << "  [size] [runs]         Optional: matrix size (default 1024) and runs (default 10)" << endl;
   cout << "\nKernel_choice: " << endl;
-  cout << "    Single kernel: 1-23 (run specific kernel)" << endl;
+  cout << "    Single kernel: 1-27 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
   cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-  cout << "    All: \"all\" (run all kernels 1-23)" << endl;
+  cout << "    All: \"all\" (run all kernels 1-27)" << endl;
   cout << "  runs: number of runs per kernel (default: 1)" << endl;
   cout << "  Options:" << endl;
   cout << "    --verbose, -v: Enable verbose output" << endl;
   cout << "    --no-check, -n: Skip result verification (performance-only mode)" << endl;
   cout << "    --check-results, -c: Enable result verification (default)" << endl;
   cout << "    --random, -r: Use random unstructured sparsity (default: pattern-based)" << endl;
+  cout << "    --blockwise, -b: Use block-level sparsity (warp-uniform patterns at BK=8 granularity)" << endl;
   cout << "    --size <N>, -s <N>: Set matrix dimensions to NxNxN (default: 4096)" << endl;
   cout << "    --pattern <P>, -p <P>: Set 8-bit sparsity pattern (default: \"11000000\")" << endl;
   cout << "    --help, -h: Show this help message" << endl;
   cout << endl;
   cout << "Sparsity Modes:" << endl;
   cout << "  Pattern-based (default): Uses repeating 8-bit pattern \"11000000\" (25% sparsity)" << endl;
-  cout << "  Random (--random, -r): Uses truly random unstructured sparsity (50% default)" << endl;
+  cout << "  Random (--random, -r): Uses truly random unstructured sparsity (37.5% default)" << endl;
+  cout << "  Block-level (--blockwise, -b): Block-level sparsity with warp-uniform patterns" << endl;
+  cout << "    - Each BK=8 block is fully dense or fully zero" << endl;
+  cout << "    - All warps share same K-block pattern (zero divergence)" << endl;
+  cout << "    - Ideal for joint A+B sparsity experiments (K22-27)" << endl;
   cout << endl;
   cout << "Examples:" << endl;
   cout << "  " << program_name << " 6 10 --verbose --no-check" << endl;
@@ -118,6 +123,7 @@ void print_usage(const char* program_name) {
   cout << "  " << program_name << " 10 5 -r -v  # Short form with random sparsity" << endl;
   cout << "  " << program_name << " 17 1 --size 2048 --pattern 10101010  # Custom size and pattern" << endl;
   cout << "  " << program_name << " 22 5 -s 8192 -p 11110000 -v  # 50% sparsity, 8192x8192" << endl;
+  cout << "  " << program_name << " 24-27 1 -b -p 11110000 -v  # Block-level A+B sparsity experiment" << endl;
 }
 
 
@@ -707,67 +713,44 @@ void randomize_matrix_A_blocklevel(float *mat, int M, int K,
          actual_sparsity, block_sparsity_percent);
 }
 
-/*
- * Generate B matrix with BLOCK-LEVEL random sparsity in K-dimension
- *
- * Similar to A, but pattern is per WN=32 columns (warp-uniform in N-dimension)
- */
+// CORRECT: Each K-block gets its own independent 8-bit pattern
+// that determines which K-rows WITHIN that block are non-zero
 template <int BK = 8, int WN = 32>
-void randomize_matrix_B_blocklevel(float *mat, int K, int N,
-                                    float block_sparsity_percent,
-                                    unsigned int seed = 0) {
-  if (seed != 0) srand(seed);
+void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
+                                          float block_sparsity_percent,
+                                          unsigned int seed = 0) {
+    if (seed != 0) srand(seed);
+    
+    const int numKBlocks = K / BK;
+    const int numNBlocks = N / WN;
+    const float sparsity_threshold = block_sparsity_percent / 100.0f;
 
-  const int numKBlocks = K / BK;
-  const int numNBlocks = N / WN;
-  const float sparsity_threshold = block_sparsity_percent / 100.0f;
-  
-  int total_blocks = 0;
-  int zero_blocks = 0;
-
-  // For each warp-level N-block
-  for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
-    // Generate random pattern for this N-block
-    uint8_t pattern = 0;
-    for (int bit = 0; bit < BK; bit++) {
-      float prob = (float)rand() / (float)RAND_MAX;
-      if (prob >= sparsity_threshold) {
-        pattern |= (1 << bit);
-      }
-    }
-
-    // Apply pattern to all WN columns in this N-block
-    for (int col = 0; col < WN; col++) {
-      const int globalN = nBlock * WN + col;
-      if (globalN >= N) break;
-
-      for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-        const int bit = kBlock % BK;
-        const bool block_is_dense = (pattern & (1 << bit));
-        total_blocks++;
-
-        if (!block_is_dense) {
-          // Zero out entire block
-          for (int k = 0; k < BK; k++) {
-            const int globalK = kBlock * BK + k;
-            if (globalK < K) {
-              mat[globalK * N + globalN] = 0.0f;
+    for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+            // Generate a FRESH pattern for THIS specific (kBlock, nBlock) tile
+            uint8_t tile_pattern = 0;
+            for (int bit = 0; bit < BK; bit++) {
+                if ((float)rand() / RAND_MAX >= sparsity_threshold) {
+                    tile_pattern |= (1 << bit);
+                }
             }
-          }
-          zero_blocks++;
-        } else {
-          // Fill block with random values
-          for (int k = 0; k < BK; k++) {
-            const int globalK = kBlock * BK + k;
-            if (globalK < K) {
-              float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
-              val = (rand() % 2 == 0) ? val : -val;
-              mat[globalK * N + globalN] = val;
+            // Apply pattern to all WN columns in this N-block
+            for (int col = 0; col < WN; col++) {
+                const int globalN = nBlock * WN + col;
+                if (globalN >= N) break;
+                for (int k = 0; k < BK; k++) {
+                    const int globalK = kBlock * BK + k;
+                    if (globalK >= K) break;
+
+                    const bool is_dense = (tile_pattern & (1 << k));
+                    if (is_dense) {
+                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+                        mat[globalK * N + globalN] = (rand() % 2) ? val : -val;
+                    } else {
+                        mat[globalK * N + globalN] = 0.0f;
+                    }
+                }
             }
-          }
         }
-      }
     }
-  }
 }
-

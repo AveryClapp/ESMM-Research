@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 23; i++) {
+    for (int i = 1; i <= 24; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 23; i++) {
+    for (int i = start; i <= end && i <= 24; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 23) {
+    if (kernel >= 1 && kernel <= 27) {
       kernels.push_back(kernel);
     }
   }
@@ -76,9 +76,10 @@ const char* get_kernel_name(int kernel_choice) {
     case 21: return "ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)";
     case 22: return "ESMM A+B Sparse (Joint Warp-Uniform Patterns, Zero-Divergence)";
     case 23: return "ESMM AB-Turbo (Precomputed Joint Patterns + Warp Shuffle)";
-    case 24: return "ESMM Joint Shared Memory Pattern Cache";
-    case 25: return "ESMM Block-wise Uniform (Large Tiles BM=256)";
-    case 26: return "ESMM Block-wise Uniform (Square Tiles BM=BN=256)";
+    case 24: return "ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)";
+    case 25: return "JOINT BASELINE (Dense, No Skipping)";
+    case 26: return "JOINT SKIP_ONLY (Skip Logic Only, No FMA)";
+    case 27: return "JOINT SKIP_FMA (Full Joint Sparse)";
     default: return "Unknown Kernel";
   }
 }
@@ -294,7 +295,6 @@ void randomize_matrix_A_unstructured(float *mat, int M, int K,
                                      float sparsity_percent,
                                      unsigned int seed = 0) {
   randomize_matrix_unstructured(mat, M, K, sparsity_percent, seed);
-  printf("Generated A (M×K) with %.1f%% unstructured sparsity\n", sparsity_percent);
 }
 
 /*
@@ -313,7 +313,6 @@ void randomize_matrix_B_unstructured(float *mat, int K, int N,
                                      float sparsity_percent,
                                      unsigned int seed = 0) {
   randomize_matrix_unstructured(mat, K, N, sparsity_percent, seed);
-  printf("Generated B (K×N) with %.1f%% unstructured sparsity\n", sparsity_percent);
 }
 
 /*
@@ -623,5 +622,152 @@ __forceinline__ __device__ void multiply_eighth(int wSubRowIdx, int wSubColIdx,
   const int regNBase = wSubColIdx * 8;
   const int threadResBase = wSubRowIdx * (WNITER * 8) + (wSubColIdx * 8);
   threadResults[threadResBase + 0] += regM_val * regN[regNBase + 0];
+}
+
+
+// ============================================================================
+// BLOCK-LEVEL RANDOM SPARSITY (For Testing Joint Patterns)
+// ============================================================================
+
+/*
+ * Generate A matrix with BLOCK-LEVEL random sparsity in K-dimension
+ *
+ * Key difference from unstructured sparsity:
+ * - Sparsity is applied at BK=8 block granularity
+ * - Each block is either fully dense or fully zero
+ * - Within a warp (WM=64 rows), all rows share same K-block pattern
+ * - This creates WARP-UNIFORM patterns suitable for K16/K17/K27
+ *
+ * Example: 50% block sparsity with BK=8
+ *   Pattern: 11110000 10100000 11010000 ... (random per K-block)
+ *   Each '0' means an entire 8-column block is zero
+ *
+ * Use case: Test joint sparsity with INDEPENDENT A and B patterns
+ */
+template <int BK = 8, int WM = 64>
+void randomize_matrix_A_blocklevel(float *mat, int M, int K,
+                                    float block_sparsity_percent,
+                                    unsigned int seed = 0) {
+  if (seed != 0) srand(seed);
+
+  const int numKBlocks = K / BK;
+  const int numMBlocks = M / WM;
+  const float sparsity_threshold = block_sparsity_percent / 100.0f;
+  
+  int total_blocks = 0;
+  int zero_blocks = 0;
+
+  // For each warp-level M-block
+  for (int mBlock = 0; mBlock < numMBlocks; mBlock++) {
+    // Generate random pattern for this M-block (8 bits for 8 K-blocks)
+    uint8_t pattern = 0;
+    for (int bit = 0; bit < BK; bit++) {
+      float prob = (float)rand() / (float)RAND_MAX;
+      if (prob >= sparsity_threshold) {
+        pattern |= (1 << bit);  // Bit=1 means block is DENSE
+      }
+    }
+
+    // Apply pattern to all WM rows in this M-block
+    for (int row = 0; row < WM; row++) {
+      const int globalM = mBlock * WM + row;
+      if (globalM >= M) break;
+
+      for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+        const int bit = kBlock % BK;
+        const bool block_is_dense = (pattern & (1 << bit));
+        total_blocks++;
+        
+        if (!block_is_dense) {
+          // Zero out entire block
+          for (int k = 0; k < BK; k++) {
+            const int globalK = kBlock * BK + k;
+            if (globalK < K) {
+              mat[globalM * K + globalK] = 0.0f;
+            }
+          }
+          zero_blocks++;
+        } else {
+          // Fill block with random values
+          for (int k = 0; k < BK; k++) {
+            const int globalK = kBlock * BK + k;
+            if (globalK < K) {
+              float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+              val = (rand() % 2 == 0) ? val : -val;
+              mat[globalM * K + globalK] = val;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  float actual_sparsity = 100.0f * zero_blocks / total_blocks;
+  printf("  A matrix: %.1f%% block-level sparsity (requested %.1f%%)\n", 
+         actual_sparsity, block_sparsity_percent);
+}
+
+/*
+ * Generate B matrix with BLOCK-LEVEL random sparsity in K-dimension
+ *
+ * Similar to A, but pattern is per WN=32 columns (warp-uniform in N-dimension)
+ */
+template <int BK = 8, int WN = 32>
+void randomize_matrix_B_blocklevel(float *mat, int K, int N,
+                                    float block_sparsity_percent,
+                                    unsigned int seed = 0) {
+  if (seed != 0) srand(seed);
+
+  const int numKBlocks = K / BK;
+  const int numNBlocks = N / WN;
+  const float sparsity_threshold = block_sparsity_percent / 100.0f;
+  
+  int total_blocks = 0;
+  int zero_blocks = 0;
+
+  // For each warp-level N-block
+  for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
+    // Generate random pattern for this N-block
+    uint8_t pattern = 0;
+    for (int bit = 0; bit < BK; bit++) {
+      float prob = (float)rand() / (float)RAND_MAX;
+      if (prob >= sparsity_threshold) {
+        pattern |= (1 << bit);
+      }
+    }
+
+    // Apply pattern to all WN columns in this N-block
+    for (int col = 0; col < WN; col++) {
+      const int globalN = nBlock * WN + col;
+      if (globalN >= N) break;
+
+      for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+        const int bit = kBlock % BK;
+        const bool block_is_dense = (pattern & (1 << bit));
+        total_blocks++;
+
+        if (!block_is_dense) {
+          // Zero out entire block
+          for (int k = 0; k < BK; k++) {
+            const int globalK = kBlock * BK + k;
+            if (globalK < K) {
+              mat[globalK * N + globalN] = 0.0f;
+            }
+          }
+          zero_blocks++;
+        } else {
+          // Fill block with random values
+          for (int k = 0; k < BK; k++) {
+            const int globalK = kBlock * BK + k;
+            if (globalK < K) {
+              float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+              val = (rand() % 2 == 0) ? val : -val;
+              mat[globalK * N + globalN] = val;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 

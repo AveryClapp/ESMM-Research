@@ -136,10 +136,14 @@ __global__ void __launch_bounds__(NUM_THREADS)
                         const uint8_t count = PATTERN_LUT_BK8[pattern].count;
                         const uint8_t* offsets = PATTERN_LUT_BK8[pattern].offsets;
                         const float regM_val = regM[wSubRowIdx];
-                        
+
                         switch (count) {
+                            case 1:
+                                multiply_offsets_1(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsets);
+                                break;
                             case 2:
                                 multiply_offsets_2(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsets);
+                                break;
                             case 4:
                                 multiply_offsets_4(wSubRowIdx, wSubColIdx, WNITER, regM_val, regN, threadResults, offsets);
                                 break;

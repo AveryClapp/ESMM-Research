@@ -2,14 +2,6 @@
 
 High-performance CUDA kernels for sparse matrix multiplication, exploiting pattern-based sparsity in neural network activations.
 
-## Key Results
-
-**Best Kernel (K28)**: 8×32 granularity joint A+B sparsity
-- Achieves near-linear speedup with combined sparsity
-- Zero warp divergence through warp-uniform pattern skipping
-- Efficient pattern preprocessing with coalesced memory access
-
-See [KERNELS.md](docs/KERNELS.md) for full progression.
 
 ## Quick Start
 
@@ -57,19 +49,17 @@ Pattern-based skipping of zero elements in activation matrix:
 - **K16**: Block-wise warp-uniform patterns (best A-only)
 - 8×32 granularity, zero divergence, ~2x speedup at 50% sparsity
 
-### B-Matrix Sparsity (K17-18, K21)
+### B-Matrix Sparsity (K17-19)
 Exploiting sparsity in weight matrix:
 - **K17**: Warp-granularity (32-col blocks)
 - **K18**: TN-granularity (8-col blocks, higher divergence)
-- **K21**: Warp-uniform (simplest, best B-only)
+- **K19**: Warp-uniform (simplest, best B-only)
 
-### Joint A+B Sparsity (K24, K28-29)
+### Joint A+B Sparsity (K20-21)
 Multiplicative sparsity benefits from combined skipping:
-- **K24**: Coarse 64×32 granularity, zero-overhead inner loop
-- **K28**: Fine 8×32 granularity, independent sub-tile patterns (best overall)
-- **K29**: Medium 32×32 granularity (balanced)
-
-**Finding**: Joint A+B sparsity achieves ~4x speedup at 50%×50% sparsity (vs 2x for A-only or B-only).
+- **K20**: Coarse 64×32 granularity, zero-overhead inner loop
+- **K21**: Fine 8×32 granularity, independent sub-tile patterns (best overall)
+- **K22**: Medium 32×32 granularity (balanced)
 
 ## Implementation Highlights
 
@@ -160,24 +150,8 @@ All kernels validate against cuBLAS with 1e-3 tolerance:
 ## Research Notes
 
 Failed experiments archived in `docs/archived_experiments/`:
-- K19-20: B-transpose approaches (too much overhead)
-- K22-23: Early joint patterns (suboptimal indexing)
-- K25-27: Skip logic ablation studies
 
 Key finding: Joint A+B sparsity requires careful granularity tuning. Too fine (8×8) has high pattern overhead, too coarse (64×64) misses skipping opportunities. 8×32 (K28) strikes optimal balance.
-
-## Performance Characteristics
-
-Measured on NVIDIA A100 (80GB), 4096×4096×4096 matrices:
-
-| Kernel | Sparsity | Time (µs) | vs Dense | Memory BW |
-|--------|----------|-----------|----------|-----------|
-| K10 (cuBLAS) | Dense | ~850 | 1.0x | ~85% |
-| K16 (A-sparse) | 50% A | ~425 | 2.0x | ~75% |
-| K21 (B-sparse) | 50% B | ~440 | 1.9x | ~72% |
-| K28 (Joint) | 50%×50% | ~220 | 3.9x | ~65% |
-
-At 75% combined sparsity: K28 achieves ~8x speedup over dense.
 
 ## Citation
 

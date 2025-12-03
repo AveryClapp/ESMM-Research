@@ -25,7 +25,7 @@ struct PreprocessResult {
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 27; i++) {
+    for (int i = 1; i <= 29; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -34,7 +34,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 27; i++) {
+    for (int i = start; i <= end && i <= 29; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -43,7 +43,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 27) {
+    if (kernel >= 1 && kernel <= 29) {
       kernels.push_back(kernel);
     }
   }
@@ -80,6 +80,8 @@ const char* get_kernel_name(int kernel_choice) {
     case 25: return "JOINT BASELINE (Dense, No Skipping)";
     case 26: return "JOINT SKIP_ONLY (Skip Logic Only, No FMA)";
     case 27: return "JOINT SKIP_FMA (Full Joint Sparse)";
+    case 28: return "ESMM A+B Sparse - 8x32 GRANULARITY";
+    case 29: return "ESMM A+B Sparse - 32x32 GRANULARITY";
     default: return "Unknown Kernel";
   }
 }
@@ -92,10 +94,10 @@ void print_usage(const char* program_name) {
   cout << "  0b, --preprocess-b    Run B matrix preprocessing verification" << endl;
   cout << "  [size] [runs]         Optional: matrix size (default 1024) and runs (default 10)" << endl;
   cout << "\nKernel_choice: " << endl;
-  cout << "    Single kernel: 1-27 (run specific kernel)" << endl;
+  cout << "    Single kernel: 1-29 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
   cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
-  cout << "    All: \"all\" (run all kernels 1-27)" << endl;
+  cout << "    All: \"all\" (run all kernels 1-29)" << endl;
   cout << "  runs: number of runs per kernel (default: 1)" << endl;
   cout << "  Options:" << endl;
   cout << "    --verbose, -v: Enable verbose output" << endl;
@@ -652,88 +654,76 @@ __forceinline__ __device__ void multiply_eighth(int wSubRowIdx, int wSubColIdx,
  */
 template <int BK = 8, int WM = 64>
 void randomize_matrix_A_blocklevel(float *mat, int M, int K,
-                                    float block_sparsity_percent,
-                                    unsigned int seed = 0) {
-  if (seed != 0) srand(seed);
-
-  const int numKBlocks = K / BK;
-  const int numMBlocks = M / WM;
-  const float sparsity_threshold = block_sparsity_percent / 100.0f;
-  
-  int total_blocks = 0;
-  int zero_blocks = 0;
-
-  // For each warp-level M-block
-  for (int mBlock = 0; mBlock < numMBlocks; mBlock++) {
-    // Generate random pattern for this M-block (8 bits for 8 K-blocks)
-    uint8_t pattern = 0;
-    for (int bit = 0; bit < BK; bit++) {
-      float prob = (float)rand() / (float)RAND_MAX;
-      if (prob >= sparsity_threshold) {
-        pattern |= (1 << bit);  // Bit=1 means block is DENSE
-      }
-    }
-
-    // Apply pattern to all WM rows in this M-block
-    for (int row = 0; row < WM; row++) {
-      const int globalM = mBlock * WM + row;
-      if (globalM >= M) break;
-
-      for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-        const int bit = kBlock % BK;
-        const bool block_is_dense = (pattern & (1 << bit));
-        total_blocks++;
-        
-        if (!block_is_dense) {
-          // Zero out entire block
-          for (int k = 0; k < BK; k++) {
-            const int globalK = kBlock * BK + k;
-            if (globalK < K) {
-              mat[globalM * K + globalK] = 0.0f;
-            }
-          }
-          zero_blocks++;
-        } else {
-          // Fill block with random values
-          for (int k = 0; k < BK; k++) {
-            const int globalK = kBlock * BK + k;
-            if (globalK < K) {
-              float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
-              val = (rand() % 2 == 0) ? val : -val;
-              mat[globalM * K + globalK] = val;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  float actual_sparsity = 100.0f * zero_blocks / total_blocks;
-  printf("  A matrix: %.1f%% block-level sparsity (requested %.1f%%)\n", 
-         actual_sparsity, block_sparsity_percent);
-}
-
-// CORRECT: Each K-block gets its own independent 8-bit pattern
-// that determines which K-rows WITHIN that block are non-zero
-template <int BK = 8, int WN = 32>
-void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
                                           float block_sparsity_percent,
                                           unsigned int seed = 0) {
     if (seed != 0) srand(seed);
     
     const int numKBlocks = K / BK;
-    const int numNBlocks = N / WN;
+    const int numMBlocks = M / WM;
     const float sparsity_threshold = block_sparsity_percent / 100.0f;
 
-    for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
+    for (int mBlock = 0; mBlock < numMBlocks; mBlock++) {
         for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-            // Generate a FRESH pattern for THIS specific (kBlock, nBlock) tile
+            // Generate a FRESH pattern for THIS specific (mBlock, kBlock) tile
             uint8_t tile_pattern = 0;
             for (int bit = 0; bit < BK; bit++) {
                 if ((float)rand() / RAND_MAX >= sparsity_threshold) {
                     tile_pattern |= (1 << bit);
                 }
             }
+            
+            // Apply pattern to all WM rows in this M-block
+            for (int row = 0; row < WM; row++) {
+                const int globalM = mBlock * WM + row;
+                if (globalM >= M) break;
+                
+                for (int k = 0; k < BK; k++) {
+                    const int globalK = kBlock * BK + k;
+                    if (globalK >= K) break;
+                    
+                    const bool is_dense = (tile_pattern & (1 << k));
+                    if (is_dense) {
+                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+                        mat[globalM * K + globalK] = (rand() % 2) ? val : -val;
+                    } else {
+                        mat[globalM * K + globalK] = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// FIXED: K-dimension patterns must be CONSISTENT across all N-blocks
+// For joint sparsity kernels (K22-K27), the B matrix pattern represents
+// "which K-rows have non-zeros". This must be the same across all columns!
+template <int BK = 8, int WN = 32>
+void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
+                                          float block_sparsity_percent,
+                                          unsigned int seed = 0) {
+    if (seed != 0) srand(seed);
+
+    const int numKBlocks = K / BK;
+    const int numNBlocks = N / WN;
+    const float sparsity_threshold = block_sparsity_percent / 100.0f;
+
+    // Pre-generate ONE pattern per K-block (shared across all N-blocks)
+    std::vector<uint8_t> k_patterns(numKBlocks);
+    for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+        uint8_t pattern = 0;
+        for (int bit = 0; bit < BK; bit++) {
+            if ((float)rand() / RAND_MAX >= sparsity_threshold) {
+                pattern |= (1 << bit);
+            }
+        }
+        k_patterns[kBlock] = pattern;
+    }
+
+    // Apply the SAME K-pattern to ALL N-blocks
+    for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+            const uint8_t tile_pattern = k_patterns[kBlock];  // SAME for all N-blocks
+
             // Apply pattern to all WN columns in this N-block
             for (int col = 0; col < WN; col++) {
                 const int globalN = nBlock * WN + col;
@@ -743,6 +733,198 @@ void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
                     if (globalK >= K) break;
 
                     const bool is_dense = (tile_pattern & (1 << k));
+                    if (is_dense) {
+                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+                        mat[globalK * N + globalN] = (rand() % 2) ? val : -val;
+                    } else {
+                        mat[globalK * N + globalN] = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 8-ROW GRANULARITY GENERATION (For K28 - True 8×32 tiles)
+// ============================================================================
+
+/*
+ * Generate A matrix with 8-row granularity random sparsity
+ *
+ * For 8×32 granularity kernels (K28):
+ * - Each 8-row tile gets an independent random pattern
+ * - Different from WM=64 which applies same pattern to all 64 rows
+ * - More realistic: adjacent 8-row groups can have different sparsity
+ */
+template <int BK = 8, int TILE_M = 8>
+void randomize_matrix_A_8row(float *mat, int M, int K,
+                              float block_sparsity_percent,
+                              unsigned int seed = 0) {
+    if (seed != 0) srand(seed);
+
+    const int numKBlocks = K / BK;
+    const int numTileRows = M / TILE_M;
+    const float sparsity_threshold = block_sparsity_percent / 100.0f;
+
+    for (int tileRow = 0; tileRow < numTileRows; tileRow++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+            // Generate independent random pattern for EACH 8-row tile
+            uint8_t tile_pattern = 0;
+            for (int bit = 0; bit < BK; bit++) {
+                if ((float)rand() / RAND_MAX >= sparsity_threshold) {
+                    tile_pattern |= (1 << bit);
+                }
+            }
+
+            // Apply pattern to these 8 rows
+            for (int row = 0; row < TILE_M; row++) {
+                const int globalM = tileRow * TILE_M + row;
+                if (globalM >= M) break;
+
+                for (int k = 0; k < BK; k++) {
+                    const int globalK = kBlock * BK + k;
+                    if (globalK >= K) break;
+
+                    const bool is_dense = (tile_pattern & (1 << k));
+                    if (is_dense) {
+                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+                        mat[globalM * K + globalK] = (rand() % 2) ? val : -val;
+                    } else {
+                        mat[globalM * K + globalK] = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// A-Matrix Blockwise 32-row Granularity (For K29)
+// ============================================================================
+
+template <int BK = 8, int TILE_M = 32>
+void randomize_matrix_A_32row(float *mat, int M, int K,
+                              float block_sparsity_percent,
+                              unsigned int seed = 0) {
+    if (seed != 0) srand(seed);
+
+    const int numKBlocks = K / BK;
+    const int numTileRows = M / TILE_M;
+    const float sparsity_threshold = block_sparsity_percent / 100.0f;
+
+    for (int tileRow = 0; tileRow < numTileRows; tileRow++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+            // Generate independent random pattern for EACH 32-row tile
+            uint8_t tile_pattern = 0;
+            for (int bit = 0; bit < BK; bit++) {
+                if ((float)rand() / RAND_MAX >= sparsity_threshold) {
+                    tile_pattern |= (1 << bit);
+                }
+            }
+
+            // Apply pattern to these 32 rows
+            for (int row = 0; row < TILE_M; row++) {
+                const int globalM = tileRow * TILE_M + row;
+                if (globalM >= M) break;
+
+                for (int k = 0; k < BK; k++) {
+                    const int globalK = kBlock * BK + k;
+                    if (globalK >= K) break;
+
+                    const bool is_dense = (tile_pattern & (1 << k));
+                    if (is_dense) {
+                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+                        mat[globalM * K + globalK] = (rand() % 2) ? val : -val;
+                    } else {
+                        mat[globalM * K + globalK] = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// FIXED PATTERN BLOCK-LEVEL GENERATION (For K22-K27)
+// ============================================================================
+
+/*
+ * Generate A matrix with FIXED PATTERN block-level sparsity
+ *
+ * Unlike randomize_matrix_A_blocklevel which generates random patterns,
+ * this function applies the SAME user-specified pattern to ALL K-blocks.
+ *
+ * Use case: K22-K27 joint sparsity kernels with --blockwise flag
+ *           User specifies pattern "11110000" → all K-blocks use this pattern
+ */
+template <int BK = 8, int WM = 64>
+void randomize_matrix_A_blocklevel_pattern(float *mat, int M, int K,
+                                           std::string_view pattern,
+                                           unsigned int seed = 0) {
+    if (seed != 0) srand(seed);
+
+    // Convert pattern string to uint8_t bitmask
+    uint8_t fixed_pattern = computeExpandedIndicesBits(pattern);
+
+    const int numKBlocks = K / BK;
+    const int numMBlocks = M / WM;
+
+    for (int mBlock = 0; mBlock < numMBlocks; mBlock++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+            // Use FIXED pattern for ALL K-blocks (not random)
+            // Apply pattern to all WM rows in this M-block
+            for (int row = 0; row < WM; row++) {
+                const int globalM = mBlock * WM + row;
+                if (globalM >= M) break;
+
+                for (int k = 0; k < BK; k++) {
+                    const int globalK = kBlock * BK + k;
+                    if (globalK >= K) break;
+
+                    const bool is_dense = (fixed_pattern & (1 << (7 - k)));  // MSB first
+                    if (is_dense) {
+                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
+                        mat[globalM * K + globalK] = (rand() % 2) ? val : -val;
+                    } else {
+                        mat[globalM * K + globalK] = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/*
+ * Generate B matrix with FIXED PATTERN block-level sparsity
+ *
+ * Applies the SAME user-specified pattern to ALL K-blocks in B matrix.
+ */
+template <int BK = 8, int WN = 32>
+void randomize_matrix_B_blocklevel_pattern(float *mat, int K, int N,
+                                           std::string_view pattern,
+                                           unsigned int seed = 0) {
+    if (seed != 0) srand(seed);
+
+    // Convert pattern string to uint8_t bitmask
+    uint8_t fixed_pattern = computeExpandedIndicesBits(pattern);
+
+    const int numKBlocks = K / BK;
+    const int numNBlocks = N / WN;
+
+    for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
+        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
+            // Use FIXED pattern for ALL K-blocks (not random)
+            // Apply pattern to all WN columns in this N-block
+            for (int col = 0; col < WN; col++) {
+                const int globalN = nBlock * WN + col;
+                if (globalN >= N) break;
+
+                for (int k = 0; k < BK; k++) {
+                    const int globalK = kBlock * BK + k;
+                    if (globalK >= K) break;
+
+                    const bool is_dense = (fixed_pattern & (1 << (7 - k)));  // MSB first
                     if (is_dense) {
                         float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
                         mat[globalK * N + globalN] = (rand() % 2) ? val : -val;

@@ -107,6 +107,12 @@ Examples:
         action="store_true",
         help="Unload/reload NVIDIA driver between runs (VERY slow, but guarantees cold-start)",
     )
+    parser.add_argument(
+        "-b",
+        "--blockwise",
+        action="store_true",
+        help="Use block-level sparsity (warp-uniform patterns at BK=8 granularity)",
+    )
 
     return parser.parse_args()
 
@@ -292,6 +298,7 @@ def run_ncu_profile(config):
         "--force-overwrite",
         args.executable,
         str(kernel),
+        str(args.runs),  # Number of runs
         "--size",
         str(size),
         "--pattern",
@@ -299,7 +306,12 @@ def run_ncu_profile(config):
         "--no-check",  # Skip verification for speed
     ]
 
-    print(f"[Running] Kernel {kernel}, Size {size}, Sparsity {sparsity_label}")
+    # Add blockwise flag if requested
+    if args.blockwise:
+        cmd.append("--blockwise")
+
+    mode = "BLOCKWISE" if args.blockwise else "PATTERN"
+    print(f"[Running] Kernel {kernel}, Size {size}, Sparsity {sparsity_label} ({mode})")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -310,7 +322,6 @@ def run_ncu_profile(config):
             clear_cuda_cache()
 
             if args.unload_driver:
-                # Nuclear option: unload/reload driver
                 unload_reload_driver()
             else:
                 # Try GPU reset (may fail on EC2, but worth trying)

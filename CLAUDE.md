@@ -387,170 +387,323 @@ benchmarks/
 - Use `--no-check` flag to skip verification for speed
 - Executable path defaults to `./exec_dev` (development build)
 
-## B-Sparsity Implementation Architecture
+## Project Structure and Architecture
 
-### Pattern-Specialized Dispatch Mechanism
+### Directory Layout
 
-**Core Concept:** For BK=8 block sizes, each row can have 256 possible sparsity patterns (8 bits). Instead of runtime branching to check which elements to compute, we precompile 256 specialized functions - one per pattern - with zero branches.
-
-**Implementation Components:**
-
-1. **Pattern Functions** (`include/pattern_functions_bk8.cuh`):
-   - 6 hand-optimized functions for common patterns (15, 128, 192, 240, 252, 255)
-   - 1 generic fallback function for remaining 250 patterns
-   - Each function has completely unrolled loops for active columns only
-   - Zero runtime branches - all control flow determined at compile time
-
-2. **Pattern LUT** (`include/pattern_lut.cuh`):
-   - Constant memory lookup table (1.25 KB)
-   - For each pattern: count of set bits + indices of active columns
-   - Used by generic fallback function
-   - Enables runtime pattern interpretation when specialized function doesn't exist
-
-3. **Dispatch Function** (`dispatch_pattern` in pattern_functions_bk8.cuh):
-   - Switch statement over pattern value
-   - All threads in warp have same pattern → zero divergence
-   - Falls back to generic for unhandled patterns
-
-**Performance Characteristics:**
-
-**Theoretical Overhead:**
-- Switch statement: ~1-2 cycles (predictable branch)
-- Function call: Inlined by compiler (zero overhead)
-- Pattern read: Cached in registers/shared memory
-- **Total dispatch overhead: ~1-5 cycles amortized across entire warp**
-
-**Actual Performance Depends On:**
-1. **Pattern distribution:** Skewed toward 6 specialized patterns → fast path dominates
-2. **Fallback frequency:** Uniform distribution → 250/256 = 97.6% use generic path
-3. **Warp divergence:** ALL threads in warp have same pattern (warp-level mask) → zero divergence
-4. **I-cache pressure:** 256 possible code paths → potential cache thrashing
-
-**Cost-Benefit Analysis:**
-
-**Benefits (when profitable):**
-- Zero innerloop branches for specialized patterns
-- Compiler can fully unroll and optimize each pattern
-- Predictable performance for common patterns (100%, 50%, 25%, 12.5% density)
-
-**Costs (potential overhead):**
-- Switch statement dispatch (~1-5 cycles)
-- I-cache pollution from multiple code paths
-- Generic fallback has branch per column (8 branches per warp)
-- Function pointer dispatch vs direct call overhead
-
-### Experiment: Isolating Innerloop Branching Overhead
-
-**Research Question:** How much performance overhead does the pattern dispatch mechanism (switch + function calls) add compared to:
-1. Direct innerloop with branches (baseline)
-2. Direct call to specialized function (no dispatch)
-3. Function pointer LUT dispatch (alternative approach)
-
-**Hypothesis:**
-- Dispatch overhead should be **<1% of total kernel time** for large matrices (>2048)
-- For small matrices, dispatch overhead could be **5-10%** due to less compute amortization
-- Pattern distribution affects overhead: uniform → more fallback → more branches
-
-**Experimental Design:**
-
-**Kernels to Compare:**
-1. **K_DIRECT_BRANCH**: Innerloop with `if ((pattern >> col) & 1)` branches (baseline)
-2. **K_DISPATCH_SWITCH**: Current implementation with `dispatch_pattern()` switch statement
-3. **K_DISPATCH_FUNCPTR**: Function pointer LUT `void (*compute[256])(...); compute[pattern](...)`
-4. **K_DIRECT_CALL**: Hardcoded call to `compute_pattern_240()` for 50% density pattern (upper bound)
-5. **K_GENERIC_ONLY**: Always call generic fallback (lower bound for dispatch)
-
-**Variables to Control:**
-- **Matrix size:** 1024, 2048, 4096, 8192 (vary compute-to-dispatch ratio)
-- **Pattern type:**
-  - `11110000` (240) - specialized function exists
-  - `10101010` (170) - no specialized function, uses generic
-  - `11111111` (255) - dense baseline
-  - `10000000` (128) - extreme sparsity (1 column)
-- **Pattern distribution:**
-  - Uniform: All rows same pattern (best case)
-  - Random: Mix of patterns (realistic case)
-  - Adversarial: Worst-case I-cache thrashing
-
-**Metrics to Collect:**
-1. **Kernel time** (µs) - primary metric
-2. **Memory throughput** (% peak) - identify if memory-bound
-3. **Compute throughput** (% peak) - identify if compute-bound
-4. **Branch efficiency** (from `ncu --metrics branch_efficiency`)
-5. **Instruction cache hit rate** (from `ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum`)
-
-**Expected Outcomes:**
-
-**For 50% density pattern (11110000 = 240):**
 ```
-Baseline (K_DIRECT_BRANCH):     1000 µs (8 branches per K-block)
-Current (K_DISPATCH_SWITCH):    1005 µs (~0.5% overhead from switch)
-FuncPtr (K_DISPATCH_FUNCPTR):   1008 µs (~0.8% overhead from indirect call)
-Direct (K_DIRECT_CALL):         1003 µs (~0.3% overhead from direct call)
-Generic (K_GENERIC_ONLY):       1050 µs (~5% overhead from 8 branches)
+ESMM-Research/
+├── driver.cu                          # Main entry point, CLI parsing, kernel dispatch
+├── include/
+│   ├── utils.cuh                      # Matrix generation, validation, helper functions
+│   ├── runners.cuh                    # Runner functions for all kernels
+│   └── pattern_*.cuh                  # Pattern-based dispatch (B-sparsity)
+├── src/
+│   ├── kernels/                       # All CUDA kernel implementations
+│   │   ├── esmm_ab_8x32.cu           # K28: 8×32 granularity A+B sparse
+│   │   ├── esmm_ab_sparse_optimized.cu  # K24: Zero-overhead inner loop
+│   │   ├── esmm_ab_sparse.cu         # K22: Joint A+B sparsity
+│   │   ├── esmm_b_sparse_warp.cu     # K17: B-sparse warp-granularity
+│   │   └── ...                        # Other kernels (K1-K27)
+│   └── preprocessors/
+│       ├── ab_preprocessor.cu         # A+B pattern preprocessing kernels
+│       └── b_preprocessor.cu          # B-only pattern preprocessing
+├── scripts/
+│   └── benchmark.py                   # Parallel NCU benchmark runner
+└── Makefile                           # Build system
+
 ```
 
-**For random pattern (10101010 = 170, uses generic):**
+### Key Files and Their Roles
+
+#### **driver.cu** - Main Entry Point
+- **Purpose**: CLI parsing, matrix generation, kernel dispatch, verification
+- **Key Functions**:
+  - `main()`: Parse arguments, allocate memory, generate matrices
+  - `run_single_kernel()`: Switch statement dispatching to runner functions
+  - Command-line flags: `--size`, `--blockwise`, `--pattern`, `--verbose`, `--no-check`
+- **Important**:
+  - Kernel validation range is at line ~310: `if (k < 1 || k > 28)`
+  - Pattern-based matrix generation for K19-K28 at line ~375
+  - Blockwise matrix generation at line ~350
+
+#### **include/utils.cuh** - Core Utilities
+- **Purpose**: Matrix generation with various sparsity patterns, validation, helper functions
+- **Key Functions**:
+  - `parse_kernel_selection()`: Parses kernel choices (single, range, comma-separated, "all")
+  - `get_kernel_name()`: Maps kernel number to human-readable name
+  - `randomize_matrix_with_pattern()`: Column-wise pattern application
+  - `randomize_matrix_A_8row<>()`: **8-row granularity** blockwise generation (for K28)
+  - `randomize_matrix_A_blocklevel<>()`: 64-row granularity blockwise (for K22-K24)
+  - `randomize_matrix_B_blocklevel_fixed<>()`: **K-consistent** B-matrix generation
+  - `verifyResults()`: CPU validation with configurable tolerance
+- **Critical Detail**: B-matrix K-patterns MUST be consistent across all N-blocks for joint A+B sparsity to work correctly
+
+#### **include/runners.cuh** - Kernel Runner Functions
+- **Purpose**: Wrapper functions that set up parameters, call kernels, measure performance
+- **Pattern**: Each kernel has two runners:
+  - `run_<kernel_name>()`: With verification against CPU reference
+  - `run_<kernel_name>_no_check()`: Performance-only, with timing
+- **Example (K28)**:
+  ```cpp
+  bool run_esmm_ab_8x32(int rows, int cols, int inners, float *d_A, float *d_B,
+                        float *d_C, float *h_C, float *h_C_ref, int runs) {
+    // Set parameters (BM, BN, BK, WM, WN, WNITER, TM, TN)
+    // Call preprocessing: preprocess_ab_patterns_8x32<>()
+    // Launch kernel: esmm_ab_8x32<>()
+    // Verify results
+  }
+  ```
+- **K28 Specific**: Uses `WM=32, WN=64` (changed from 64×32) for 8×32 granularity
+
+#### **src/kernels/** - CUDA Kernel Implementations
+
+**Kernel Naming Convention:**
+- K1-K9: Baseline GEMM optimizations (naive → coalescing → tiling → warptiling)
+- K10-K18: A-sparse and B-sparse single-matrix optimizations
+- K19-K21: B-sparse K-dimension skipping
+- K22-K24: Joint A+B sparsity (coarse WM×BK granularity)
+- K25-K27: Joint sparsity experiments (baseline, skip-only, full)
+- **K28**: Joint A+B sparsity with **8×32 tile granularity**
+
+**K28 Architecture (`esmm_ab_8x32.cu`)**:
+```cpp
+// Template parameters
+BM=64, BN=128, BK=8
+WM=32, WN=64       // Changed from 64×32
+WNITER=2           // Kept same
+WMITER=4           // Computed: (WM*WN)/(WARPSIZE*TM*TN*WNITER) = 4
+
+// Granularity
+- Each warp processes: 32 rows × 64 cols (WM × WN)
+- M-dimension: 4 iterations × 8 rows = 32 rows (WMITER × WSUBM)
+- N-dimension: 2 iterations × 32 cols = 64 cols (WNITER × WSUBN)
+- Total sub-tiles: 8 tiles of 8×32 per warp
+
+// Pattern indexing
+- A patterns: [numTileRows × numKBlocks] where numTileRows = M/8
+- B patterns: [numWarpCols × numKBlocks] (unchanged from K24)
+- Each WMITER iteration uses DIFFERENT A-pattern (line 98-100)
 ```
-Baseline (K_DIRECT_BRANCH):     1000 µs
-Current (K_DISPATCH_SWITCH):    1050 µs (~5% overhead, uses generic fallback)
-FuncPtr (K_DISPATCH_FUNCPTR):   1055 µs (~5.5% overhead)
-Direct (K_DIRECT_CALL):         N/A (not applicable)
-Generic (K_GENERIC_ONLY):       1050 µs (same as dispatch → switch cost negligible)
+
+**Key Difference from K22-K24**:
+- K22-K24: Apply same pattern to all 64 rows (coarse granularity)
+- K28: Each 8-row sub-tile has independent pattern (fine granularity)
+
+#### **src/preprocessors/ab_preprocessor.cu** - Pattern Preprocessing
+
+**Purpose**: Analyze matrix data on GPU to extract sparsity patterns
+
+**Key Kernels**:
+1. `preprocess_a_patterns_8x8_kernel<BK=8, TILE_M=8>`:
+   - For K28 only
+   - Analyzes A matrix at 8-row granularity
+   - Output: `[M/8 × K/8]` pattern array
+
+2. `preprocess_a_patterns_blockwise<BK=8, WM=64>`:
+   - For K22-K24
+   - Analyzes A matrix at 64-row granularity
+   - Output: `[M/64 × K/8]` pattern array
+
+3. `preprocess_b_patterns_warp_granularity<BK=8, WN>`:
+   - For all B-sparse and A+B sparse kernels
+   - Analyzes B matrix at WN-column granularity
+   - Output: `[N/WN × K/8]` pattern array
+
+**Host Functions**:
+- `preprocess_ab_patterns_8x32<BK=8, TILE_M=8, WN=32>()`: Calls both A (8-row) and B preprocessors for K28
+- `preprocess_ab_patterns<BK=8, WM=64, WN=32>()`: Calls both A (64-row) and B preprocessors for K22-K24
+
+**Pattern Metadata Structure**:
+```cpp
+struct ABPatternMetadata {
+  uint8_t* d_a_patterns;  // Device pointer to A patterns
+  uint8_t* d_b_patterns;  // Device pointer to B patterns
+  int numMBlocks;         // Number of M-dimension blocks
+  int numNBlocks;         // Number of N-dimension blocks
+  int numKBlocks;         // Number of K-dimension blocks (always K/8)
+};
 ```
 
-**Analysis Plan:**
+### Blockwise Sparsity Generation (Critical for K22-K28)
 
-1. **Dispatch Overhead Calculation:**
-   ```
-   dispatch_overhead = (K_DISPATCH_SWITCH - K_DIRECT_CALL) / K_DIRECT_CALL * 100%
-   ```
+**Purpose**: Generate realistic sparse matrices where each BK×BM (or BK×BN) tile is either fully dense or fully zero, matching real workloads better than column-wise patterns.
 
-2. **Fallback Cost:**
-   ```
-   fallback_cost = (K_GENERIC_ONLY - K_DIRECT_CALL) / K_DIRECT_CALL * 100%
-   ```
+**Design Constraints**:
 
-3. **Break-Even Analysis:**
-   - At what matrix size does dispatch overhead drop below 1%?
-   - At what sparsity level does pattern specialization pay off?
+1. **A Matrix Generation** (`randomize_matrix_A_8row<BK=8, TILE_M=8>`):
+   - Each 8×8 tile gets INDEPENDENT random pattern
+   - Different tiles can have different patterns (realistic workload)
+   - Used by K28 for fine-grained 8-row granularity
 
-4. **Sensitivity Analysis:**
-   - How does pattern distribution (uniform vs random) affect overhead?
-   - Does I-cache thrashing occur with adversarial patterns?
+2. **B Matrix Generation** (`randomize_matrix_B_blocklevel_fixed<BK=8, WN>`):
+   - **CRITICAL**: K-dimension patterns MUST be consistent across all N-blocks
+   - Pre-generates ONE pattern per K-block (line 698-705)
+   - Applies SAME K-pattern to ALL N-blocks (line 716)
+   - **Why**: Preprocessor computes "Bit k = 1 if row k has ANY non-zero across ALL columns"
+   - **Bug History**: Initially generated different patterns per (kBlock, nBlock) → verification failures
 
-**Decision Criteria:**
+**Example**:
+```cpp
+// CORRECT: K-consistent B-matrix
+K-block 0: Pattern 11110000 applied to ALL N-blocks
+K-block 1: Pattern 11000000 applied to ALL N-blocks
+// Result: Preprocessor correctly sees rows 0-3 as non-zero in K-block 0
 
-**Keep current dispatch if:**
-- Overhead < 2% for typical workloads (>2048, 50% sparsity)
-- Specialized patterns show >10% speedup vs generic
-- I-cache effects are negligible
+// WRONG: K-inconsistent B-matrix (original bug)
+K-block 0, N-block 0: Pattern 11110000
+K-block 0, N-block 1: Pattern 10101010
+// Result: Preprocessor sees rows 0-3 AND 5,7 as non-zero → incorrect pattern
+```
 
-**Switch to simpler approach if:**
-- Overhead > 5% consistently
-- Generic fallback performs within 2% of specialized
-- Function pointer LUT is faster (unlikely but possible)
+### Command-Line Interface
 
-**Abandon dispatch entirely if:**
-- Direct branch approach is within 1% (branches are free)
-- Dispatch complexity outweighs benefits
-
-**Implementation Notes:**
-
-**Quick Test:**
+**Basic Syntax**:
 ```bash
-# Run experiment for 50% density pattern
-./scripts/benchmark.py -k K_DIRECT_BRANCH,K_DISPATCH_SWITCH,K_DIRECT_CALL \
-  --sizes 1024,2048,4096 \
-  --sparsity 11110000 \
-  --cold-start
-
-# Compare kernel times in summary.csv
-# Expected: <1% difference for 4096x4096
+./exec_dev [kernel_choice] [runs] [options]
 ```
 
-**Why This Experiment Matters:**
-- B-sparsity dispatch is in the critical path (executed every K-block)
-- Small overheads (1-2%) compound across millions of warps
-- Validates architectural decision: is complexity worth the benefit?
-- Informs future optimizations: focus on dispatch or focus on innerloop?
+**Kernel Selection**:
+- Single: `./exec_dev 28 10`
+- Multiple: `./exec_dev "22,24,28" 5`
+- Range: `./exec_dev "22-28" 1`
+- All: `./exec_dev all 1`
+
+**Sparsity Modes**:
+1. **Pattern-based (default)**: Column-wise 8-bit pattern
+   ```bash
+   ./exec_dev 28 1 --pattern 11110000  # 50% density
+   ```
+
+2. **Blockwise**: Block-level warp-uniform patterns
+   ```bash
+   ./exec_dev 28 1 --blockwise --pattern 11110000
+   # Each 8×8 (A) or 8×32 (B) tile is dense or zero
+   ```
+
+3. **Random**: Unstructured sparsity (for comparison)
+   ```bash
+   ./exec_dev 28 1 --random  # 37.5% sparsity
+   ```
+
+**Common Flags**:
+- `--size 2048`: Square matrix dimension (default 4096)
+- `--verbose`: Show detailed output
+- `--no-check`: Skip verification (performance mode)
+
+### Adding a New Kernel (Checklist)
+
+When adding a new kernel (e.g., K29), update these files:
+
+1. **src/kernels/your_kernel.cu**:
+   - Implement kernel template function
+   - Document parameters and granularity
+
+2. **include/runners.cuh**:
+   - Add `#include "../src/kernels/your_kernel.cu"` at top
+   - Implement `run_your_kernel()` with verification
+   - Implement `run_your_kernel_no_check()` with timing
+
+3. **driver.cu**:
+   - Add case to switch statement in `run_single_kernel()` (~line 207)
+   - Update kernel range validation (~line 312): `if (k > 29)`
+
+4. **include/utils.cuh**:
+   - Update `parse_kernel_selection()`: Change all `27` → `29`
+   - Add case to `get_kernel_name()` switch statement
+   - Update `print_usage()`: "1-27" → "1-29"
+
+5. **Compile and test**:
+   ```bash
+   make dev
+   ./exec_dev 29 1 --verbose --size 1024
+   ```
+
+### Verification and Testing
+
+**Verification Process**:
+1. Generate dense reference with cuBLAS or ESMM kernel (K10)
+2. Run target kernel with same input matrices
+3. Compare outputs element-wise with tolerance (1e-3 default)
+4. Report: PASSED / FAILED with mismatch count
+
+**Testing Different Sparsity Levels**:
+```bash
+# Dense (100%)
+./exec_dev 28 1 --pattern 11111111 --verbose
+
+# 50% density
+./exec_dev 28 1 --pattern 11110000 --blockwise --verbose
+
+# 25% density
+./exec_dev 28 1 --pattern 11000000 --blockwise --verbose
+
+# 12.5% density (extreme)
+./exec_dev 28 1 --pattern 10000000 --blockwise --verbose
+```
+
+**Benchmarking**:
+```bash
+# Single kernel, multiple sizes
+./scripts/benchmark.py --kernel 28 --sizes 1024,2048,4096 --cold-start
+
+# Multiple kernels, compare performance
+./scripts/benchmark.py -k 22,24,28 --sizes 2048,4096 --parallel 1 --cold-start
+
+# Custom sparsity patterns
+./scripts/benchmark.py -k 28 --sparsity 11110000,11000000,10000000 --sizes 4096
+```
+
+### Common Issues and Solutions
+
+**Issue 1: Verification Failures with Blockwise**
+- **Symptom**: ~1M mismatches, large differences
+- **Cause**: B-matrix K-patterns inconsistent across N-blocks
+- **Solution**: Use `randomize_matrix_B_blocklevel_fixed()` which generates ONE pattern per K-block
+
+**Issue 2: Kernel Not Found**
+- **Symptom**: "Invalid kernel selection" or "out of range"
+- **Cause**: Forgot to update parse functions and validation ranges
+- **Solution**: Update all 4 locations (parse_kernel_selection, validation, get_kernel_name, print_usage)
+
+**Issue 3: Wrong Granularity**
+- **Symptom**: Patterns work but not testing what you think
+- **Cause**: Using WM=64 generator with WM=32 kernel (or vice versa)
+- **Solution**: Match generator granularity to kernel granularity (8-row for K28, 64-row for K22-K24)
+
+**Issue 4: Compile Warnings About Unused Variables**
+- **Symptom**: `warning: variable "regM" was declared but never referenced`
+- **Cause**: Declared register arrays but changed to direct memory access
+- **Impact**: Harmless - compiler will optimize away
+- **Solution**: Remove unused declarations or use `#pragma diag_suppress 177`
+
+### Performance Profiling Workflow
+
+1. **Quick correctness check**:
+   ```bash
+   ./exec_dev 28 1 --size 1024 --verbose
+   ```
+
+2. **No-check performance run**:
+   ```bash
+   ./exec_dev 28 100 --size 4096 --no-check --blockwise
+   ```
+
+3. **NCU detailed profile**:
+   ```bash
+   ncu --set full -o k28_profile ./exec_dev 28 1 --size 4096 --no-check
+   ncu --import k28_profile.ncu-rep --page details
+   ```
+
+4. **Automated benchmarks**:
+   ```bash
+   ./scripts/benchmark.py -k 28 --sizes 1024,2048,4096 --cold-start --parallel 1
+   ```
+
+5. **Compare kernels**:
+   ```bash
+   # Compare K24 (64-row) vs K28 (8-row) granularity
+   ./scripts/benchmark.py -k 24,28 --sizes 4096 --sparsity 11110000 --cold-start
+   ```
+
+

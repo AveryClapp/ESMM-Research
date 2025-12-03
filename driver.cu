@@ -204,6 +204,20 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_joint_skip_fma_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 28: // ESMM A+B Sparse - 8×32 GRANULARITY
+        if (check_results) {
+            res = run_esmm_ab_8x32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_8x32_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 29: // ESMM A+B Sparse - 32×32 GRANULARITY
+        if (check_results) {
+            res = run_esmm_ab_32x32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_32x32_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -299,10 +313,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Validate all kernel choices are in valid range (1-27)
+    // Validate all kernel choices are in valid range (1-29)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 27) {
-            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-27." << endl;
+        if (k < 1 || k > 29) {
+            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-29." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
         }
@@ -350,8 +364,23 @@ int main(int argc, char *argv[]) {
         float density_percent = (ones_count / 8.0f) * 100.0f;
         float block_sparsity_percent = 100.0f - density_percent;
 
-        // Generate A with block-level sparsity (WM=64, BK=8)
-        randomize_matrix_A_blocklevel<8, 64>(h_A, rows, inners, block_sparsity_percent, random_seed);
+        // Check if any kernel needs fine-grained generation
+        bool use_8row = false;
+        bool use_32row = false;
+        for (int k : kernel_choices) {
+            if (k == 28) use_8row = true;
+            if (k == 29) use_32row = true;
+        }
+
+        // Generate A with appropriate granularity
+        if (use_8row) {
+            randomize_matrix_A_8row<8, 8>(h_A, rows, inners, block_sparsity_percent, random_seed);
+        } else if (use_32row) {
+            randomize_matrix_A_32row<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
+        } else {
+            // Default 64-row for K22-K24
+            randomize_matrix_A_blocklevel<8, 64>(h_A, rows, inners, block_sparsity_percent, random_seed);
+        }
 
         // Generate B with block-level sparsity (WN=32, BK=8)
         randomize_matrix_B_blocklevel_fixed<8, 32>(h_B, inners, cols, block_sparsity_percent, random_seed + 1);

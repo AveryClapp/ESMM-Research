@@ -149,8 +149,8 @@ esmm_ab_32x32(
 
         __syncthreads();
 
-        float regM[WMITER * TM];
-        float regN[WNITER * TN];
+//        float regM[WMITER * TM];
+//       float regN[WNITER * TN];
 
         // Iterate over WMITER (M-iterations)
         #pragma unroll

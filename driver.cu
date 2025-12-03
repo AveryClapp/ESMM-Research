@@ -169,6 +169,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_32x32_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 23: // ESMM A Sparse Blockwise Skipping
+        if (check_results) {
+            res = run_esmm_a_sparse_blockwise_skip(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_a_sparse_blockwise_skip_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -266,7 +273,7 @@ int main(int argc, char *argv[]) {
 
     // Validate all kernel choices are in valid range (1-29)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 22) {
+        if (k < 1 || k > 23) {
             cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-29." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
@@ -316,11 +323,13 @@ int main(int argc, char *argv[]) {
         float block_sparsity_percent = 100.0f - density_percent;
 
         for (int k : kernel_choices) {
-            if (k == 28) { 
+            if (k == 21) { 
                 randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent, random_seed);
             }
-            else {
+            else if (k == 22) {
                 randomize_matrix_A<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
+            } else {
+                randomize_matrix_A_blocklevel<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
             }
         }
 

@@ -15,7 +15,7 @@ using std::endl;
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 29; i++) {
+    for (int i = 1; i <= 23; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -24,7 +24,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 29; i++) {
+    for (int i = start; i <= end && i <= 23; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -33,7 +33,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 29) {
+    if (kernel >= 1 && kernel <= 23) {
       kernels.push_back(kernel);
     }
   }
@@ -60,11 +60,12 @@ const char* get_kernel_name(int kernel_choice) {
     case 15: return "cuBLAS";
     case 16: return "ESMM A-Sparse Block-wise (Warp-Granularity Patterns)";
     case 17: return "ESMM B-Sparse Warp-Granularity (32-col, Zero-Divergence)";
-    case 19: return "ESMM B-Sparse TN-Granularity (8-col, Per Thread-Group)";
-    case 20: return "ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)";
-    case 21: return "ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)";
-    case 22: return "ESMM A+B Sparse - 8x32 GRANULARITY";
-    case 23: return "ESMM A+B Sparse - 32x32 GRANULARITY";
+    case 18: return "ESMM B-Sparse TN-Granularity (8-col, Per Thread-Group)";
+    case 29: return "ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)";
+    case 20: return "ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)";
+    case 21: return "ESMM A+B Sparse - 8x32 GRANULARITY";
+    case 22: return "ESMM A+B Sparse - 32x32 GRANULARITY";
+    case 23: return "ESMM A Sparse - Block-wise Skipping";
     default: return "Unknown Kernel";
   }
 }
@@ -563,10 +564,6 @@ void randomize_matrix_A(float *mat, int M, int K,
 }
 
 
-
-// ============================================================================
-// FIXED PATTERN BLOCK-LEVEL GENERATION (For K22-K27)
-// ============================================================================
 
 /*
  * Generate A matrix with FIXED PATTERN block-level sparsity

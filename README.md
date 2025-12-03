@@ -10,13 +10,13 @@ High-performance CUDA kernels for sparse matrix multiplication, exploiting patte
 make dev
 
 # Run single kernel
-./exec_dev 28 10 --size 4096 --pattern 11110000
+./exec_dev 15 10 --size 4096 --pattern 11110000
 
 # Run benchmark suite
-./scripts/benchmark.py --kernel 28 --sizes 2048,4096 --cold-start
+./scripts/benchmark.py --kernel 19 --sizes 2048,4096 --cold-start
 
 # Compare multiple kernels
-./exec_dev "17,21,24,28" 5 --blockwise --pattern 11110000
+./exec_dev "10,12,15,20" 5 --blockwise --pattern 11110000
 ```
 
 ## Repository Structure
@@ -102,16 +102,16 @@ The `scripts/benchmark.py` tool automates NCU profiling with proper cold-start h
 
 ```bash
 # Single kernel, default sparsity levels
-./scripts/benchmark.py --kernel 28
+./scripts/benchmark.py --kernel 19
 
 # Multiple kernels, custom sizes
-./scripts/benchmark.py -k 17,21,24,28 --sizes 2048,4096
+./scripts/benchmark.py -k 17,19,22 --sizes 2048,4096
 
 # Cold-start mode (matches manual profiling)
-./scripts/benchmark.py -k 28 --cold-start --parallel 1
+./scripts/benchmark.py -k 22 --cold-start --parallel 1
 
 # Custom sparsity patterns
-./scripts/benchmark.py -k 28 --sparsity 11110000,11000000,10000000
+./scripts/benchmark.py -k 22 --sparsity 11110000,11000000,10000000
 ```
 
 Default patterns: 100% (11111111), 50% (11110000), 25% (11000000), 12.5% (10000000)
@@ -123,28 +123,28 @@ See `python scripts/benchmark.py --help` for all options.
 ### Pattern-Based (default)
 Column-wise 8-bit patterns, useful for structured sparsity:
 ```bash
-./exec_dev 28 1 --pattern 11110000  # 50% density
+./exec_dev 19 1 --pattern 11110000  # 50% density
 ```
 
 ### Blockwise
 Block-level warp-uniform patterns (realistic workloads):
 ```bash
-./exec_dev 28 1 --blockwise --pattern 11110000
+./exec_dev 19 1 --blockwise --pattern 11110000
 # Each 8×8 (A) or 8×32 (B) tile is fully dense or fully zero
 ```
 
 ### Random
 Unstructured sparsity for comparison:
 ```bash
-./exec_dev 28 1 --random  # 37.5% sparsity
+./exec_dev 20 1 --random  # 37.5% sparsity
 ```
 
 ## Verification
 
 All kernels validate against cuBLAS with 1e-3 tolerance:
 ```bash
-./exec_dev 28 1 --verbose           # With verification
-./exec_dev 28 100 --no-check        # Performance-only
+./exec_dev 16 1 --verbose           # With verification
+./exec_dev 16 100 --no-check        # Performance-only
 ```
 
 ## Research Notes

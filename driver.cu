@@ -141,77 +141,28 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_b_sparse_tn_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 19: // ESMM B-Transpose Sparse (K-iteration skipping)
-        if (check_results) {
-            res = run_esmm_b_transpose_k19(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_b_transpose_k19_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 20: // ESMM B-Sparse Shared Memory Transpose (WN-granularity)
-        if (check_results) {
-            res = run_esmm_b_smem_transpose(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_b_smem_transpose_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 21: // ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)
+    case 19: // ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)
         if (check_results) {
             res = run_esmm_b_sparse(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_b_sparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 22: // ESMM A+B Sparse (Joint Warp-Uniform Patterns, Zero-Divergence)
-        if (check_results) {
-            res = run_esmm_ab_sparse(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_ab_sparse_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 23: // ESMM AB-Turbo (Precomputed Joint Patterns + Warp Shuffle)
-        if (check_results) {
-            res = run_esmm_ab_turbo(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_esmm_ab_turbo_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 24: // ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)
+    case 20: // ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)
         if (check_results) {
             res = run_esmm_ab_sparse_optimized(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_ab_sparse_optimized_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 25: // JOINT BASELINE (Dense, No Skipping)
-        if (check_results) {
-            res = run_joint_baseline(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_joint_baseline_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 26: // JOINT SKIP_ONLY (Skip Logic Only, No FMA)
-        if (check_results) {
-            res = run_joint_skip_only(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_joint_skip_only_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 27: // JOINT SKIP_FMA (Full Joint Sparse)
-        if (check_results) {
-            res = run_joint_skip_fma(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
-        } else {
-            res = run_joint_skip_fma_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
-        }
-        break;
-    case 28: // ESMM A+B Sparse - 8×32 GRANULARITY
+    case 21: // ESMM A+B Sparse - 8×32 GRANULARITY
         if (check_results) {
             res = run_esmm_ab_8x32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_ab_8x32_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 29: // ESMM A+B Sparse - 32×32 GRANULARITY
+    case 22: // ESMM A+B Sparse - 32×32 GRANULARITY
         if (check_results) {
             res = run_esmm_ab_32x32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
@@ -315,7 +266,7 @@ int main(int argc, char *argv[]) {
 
     // Validate all kernel choices are in valid range (1-29)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 29) {
+        if (k < 1 || k > 22) {
             cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-29." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
@@ -364,25 +315,16 @@ int main(int argc, char *argv[]) {
         float density_percent = (ones_count / 8.0f) * 100.0f;
         float block_sparsity_percent = 100.0f - density_percent;
 
-        // Check if any kernel needs fine-grained generation
-        bool use_8row = false;
-        bool use_32row = false;
         for (int k : kernel_choices) {
-            if (k == 28) use_8row = true;
-            if (k == 29) use_32row = true;
+            if (k == 28) { 
+                randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent, random_seed);
+            }
+            else {
+                randomize_matrix_A<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
+            }
         }
 
         // Generate A with appropriate granularity
-        if (use_8row) {
-            randomize_matrix_A_8row<8, 8>(h_A, rows, inners, block_sparsity_percent, random_seed);
-        } else if (use_32row) {
-            randomize_matrix_A_32row<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
-        } else {
-            // Default 64-row for K22-K24
-            randomize_matrix_A_blocklevel<8, 64>(h_A, rows, inners, block_sparsity_percent, random_seed);
-        }
-
-        // Generate B with block-level sparsity (WN=32, BK=8)
         randomize_matrix_B_blocklevel_fixed<8, 32>(h_B, inners, cols, block_sparsity_percent, random_seed + 1);
 
         if (verbose) {
@@ -393,11 +335,10 @@ int main(int argc, char *argv[]) {
         randomize_matrix_unstructured(h_B, inners, cols, random_sparsity_percent, random_seed + 1);
     } else {
         randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
-        // For B-sparse K-skipping kernels (19, 20, 21, 22, 23, 24, 25, 26, 27), use K-dimension pattern
         bool use_b_kdim = false;
         for (size_t i = 0; i < kernel_choices.size(); i++) {
             int k = kernel_choices[i];
-            if (k >= 19 && k <= 27) {
+            if (k >= 19) {
                 use_b_kdim = true;
                 break;
             }
@@ -421,6 +362,7 @@ int main(int argc, char *argv[]) {
                               cudaMemcpyHostToDevice));
 
     if (check_results) {
+        //TODO: Helper function here
         if (verbose) cout << "Generating GPU reference solution using ESMM kernel..." << endl;
 
         // Use ESMM kernel to generate reference instead of CPU

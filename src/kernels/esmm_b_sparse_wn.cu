@@ -1,18 +1,7 @@
 #pragma once
 
-/*
- * ============================================================================
- * Kernel: B-Sparse GEMM with Warp-Uniform Pattern Checking
- * ============================================================================
- *
- * KEY INSIGHT: All 32 threads in a warp access the SAME K-row of B.
- * Pattern check is warp-uniform → zero divergence.
- *
- * WHY THIS WINS:
- *   1. NO TRANSPOSE (vs K19, K20)
- *   2. NO COMPLEX DISPATCH (vs K21, K22) - just one AND + branch
- *   3. ZERO WARP DIVERGENCE
- */
+// K21: B-sparse with warp-uniform pattern checking
+// All threads in warp access same K-row of B, zero divergence
 
 #include <cuda_runtime.h>
 #include "../preprocessors/b_preprocessor_wn_uniform.cu"

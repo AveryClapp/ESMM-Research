@@ -1,34 +1,5 @@
 #pragma once
 
-/*
- * ============================================================================
- * Kernel 29: ESMM A+B Sparse - 32×32 GRANULARITY
- * ============================================================================
- *
- * KEY DESIGN: WM=32, WN=32 for balanced 32×8 A-tiles and 8×32 B-tiles
- *
- * PARAMETERS:
- * - BM=64, BN=128, BK=8 (block tile sizes)
- * - WM=32, WN=32 (warp tile sizes) ← Changed from K24's 64×32
- * - WNITER=1 (single N-iteration)
- * - WMITER=2 (2 M-iterations, computed automatically)
- *
- * GRANULARITY:
- * - A patterns: 32×8 tiles (32 rows × 8 K-cols)
- * - B patterns: 8×32 tiles (8 K-rows × 32 cols)
- * - Each warp: 2 A-patterns (one per 32-row group)
- * - Each warp: 1 B-pattern (for 32 columns)
- * - Total: 2 joint patterns per warp per K-block
- *
- * COMPARISON TO K24:
- * - K24: 64×8 A-tiles, 1 pattern per warp → coarse M-granularity
- * - K29: 32×8 A-tiles, 2 patterns per warp → 2× finer M-granularity
- * - Same pattern check overhead (2 checks/K-block)
- *
- * COMPARISON TO K28:
- * - K28: 8×8 A-tiles, 8 patterns per warp → too much overhead
- * - K29: 32×8 A-tiles, 2 patterns per warp → balanced overhead
- */
 
 #include <cuda_runtime.h>
 #include <cstdint>
@@ -79,9 +50,6 @@ esmm_ab_32x32(
     // Each warp needs WMITER patterns per K-block (one per 32-row sub-tile)
     __shared__ uint8_t joint_smem[NUM_WARPS * WMITER * 1024];
 
-    // ========================================================================
-    // OPTIMIZATION: Precompute ALL joint patterns at kernel start (32×8 granularity)
-    // ========================================================================
     {
         const uint globalMBlock = cRow;
         const uint globalNBlock = cCol;
@@ -132,9 +100,6 @@ esmm_ab_32x32(
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-    // ========================================================================
-    // K-LOOP with 32×8 granularity pattern checking
-    // ========================================================================
     for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
@@ -184,9 +149,6 @@ esmm_ab_32x32(
 
         __syncthreads();
 
-        // ====================================================================
-        // INNER LOOP: 32×8 granularity with per-sub-tile pattern checking
-        // ====================================================================
         float regM[WMITER * TM];
         float regN[WNITER * TN];
 
@@ -227,14 +189,10 @@ esmm_ab_32x32(
     }
 
     // Write results back to C
-    #pragma unroll
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-        #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             float* C_sub = C + wSubRowIdx * WSUBM * N + wSubColIdx * WSUBN;
-            #pragma unroll
             for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
-                #pragma unroll
                 for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
                     float4 tmp;
                     const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +

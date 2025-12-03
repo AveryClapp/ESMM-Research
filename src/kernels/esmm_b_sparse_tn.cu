@@ -1,29 +1,6 @@
 #pragma once
-/*
- * ============================================================================
- * Kernel: ESMM B-Sparse TN-Granularity (8-column blocks)
- * ============================================================================
- *
- * Strategy:
- *   Use TN-granularity patterns (BK × TN blocks) to enable per-thread-group
- *   sparsity exploitation. Each pattern covers the 8 columns that a thread
- *   group actually works on.
- *
- * Architecture:
- *   - Preprocessing: OR together sparsity across TN=8 columns → single 8-bit pattern
- *   - Runtime: Each thread group loads its own pattern (4 patterns per warp)
- *   - Computation: Template dispatch enables full loop unrolling
- *
- * Performance Characteristics:
- *   - Memory: 4× more patterns than WN-granularity (~256 KB for 4096×4096)
- *   - Divergence: Potentially higher (different thread groups may diverge)
- *   - Precision: Better (only compute what each thread group needs)
- *
- * Key Difference from WN-granularity:
- *   - WN=32: One pattern per warp → all threads use same pattern → warp-uniform
- *   - TN=8: One pattern per thread group → different groups may diverge → thread-divergent
- *   - Tradeoff: Finer granularity vs. potential warp divergence
- */
+// K18: B-sparse with TN-granularity patterns (8-column blocks)
+// Per-thread-group patterns, potential warp divergence
 
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"

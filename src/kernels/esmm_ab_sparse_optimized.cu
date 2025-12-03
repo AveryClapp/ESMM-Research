@@ -1,24 +1,7 @@
 #pragma once
 
-/*
- * ============================================================================
- * Kernel 24: ESMM A+B Sparse - OPTIMIZED (Zero-Overhead Inner Loop)
- * ============================================================================
- *
- * KEY INSIGHT: Use K21's simple loop structure with joint patterns
- *
- * OPTIMIZATIONS vs K22/K23:
- * 1. ✅ Precomputes joint patterns in shared memory (like K22)
- * 2. ✅ Direct bit checking with continue (like K21) - NO offset array computation
- * 3. ✅ Sequential dotIdx iteration - NO indirect memory access
- * 4. ✅ Lower register pressure - simpler scope
- *
- * PERFORMANCE:
- * - Saves ~20 cycles/K-block: No offset computation
- * - Saves ~10 cycles/K-block: No loop control overhead
- * - Better memory access: Sequential vs indirect
- * - Expected: ~50-60% faster than K22/K23, matches K16/K21 performance
- */
+// K24: Joint A+B sparsity with zero-overhead inner loop
+// Direct bit checking (no offset array), sequential iteration
 
 #include <cuda_runtime.h>
 #include <cstdint>

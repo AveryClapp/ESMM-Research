@@ -72,3 +72,17 @@ comparison.csv
 
 # Documentation drafts (keep CLAUDE.md out of repo)
 CLAUDE.md
+CLEANUP_STATUS.md
+
+# Temporary files
+temp_*.cu
+*.tmp
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Benchmark outputs
+benchmarks/
+*.log

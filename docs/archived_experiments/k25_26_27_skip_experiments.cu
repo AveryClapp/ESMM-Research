@@ -1,23 +1,7 @@
 #pragma once
 
-/*
- * JOINT SPARSITY SKIP EXPERIMENTS
- *
- * Isolate the overhead of K-iteration skipping with precomputed joint patterns.
- * All kernels use IDENTICAL preprocessing - differences are ONLY in skip logic.
- *
- * KERNELS:
- * K25: BASELINE - Dense computation (no skipping, full FMA)
- * K26: SKIP_ONLY - Check patterns and skip, but NO FMA (measures pure skip cost)
- * K27: SKIP_FMA - Full joint sparse (check + skip + FMA)
- * K28: PERFECT_SKIP - Compressed K-list (iterate only non-zero blocks)
- *
- * EXPERIMENT GOALS:
- * - Measure overhead of if(joint == 0) continue; vs direct iteration
- * - Compare warp shuffle broadcast cost
- * - Validate that skip-list compression is worth complexity
- * - Determine theoretical speedup limits at different sparsity levels
- */
+// K25-27: Joint skip experiments (baseline, skip-only, skip+FMA)
+// Measure overhead of skip logic with identical preprocessing
 
 #include <cuda_runtime.h>
 #include <cstdint>

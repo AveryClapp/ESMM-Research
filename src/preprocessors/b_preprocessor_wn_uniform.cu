@@ -47,7 +47,7 @@ inline void free_b_pattern_metadata(BPatternMetadata& meta) {
 // ============================================================================
 
 template <const int BK, const int WN, const int NUM_THREADS>
-__global__ void preprocess_b_patterns_kernel(
+__global__ void preprocess_b_patterns_kernel_wn(
     int K, int N,
     const float* __restrict__ B,
     uint8_t* __restrict__ patterns
@@ -170,7 +170,7 @@ BPatternMetadata preprocess_b_patterns(const float* d_B, int K, int N) {
     cudaEventCreate(&stop);
     cudaEventRecord(start);
 
-    preprocess_b_patterns_kernel<BK, WN, NUM_THREADS><<<grid, block>>>(
+    preprocess_b_patterns_kernel_wn<BK, WN, NUM_THREADS><<<grid, block>>>(
         K, N, d_B, meta.d_patterns
     );
 

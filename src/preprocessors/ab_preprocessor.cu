@@ -1,30 +1,5 @@
 #pragma once
 
-/*
- * ============================================================================
- * Joint A+B Preprocessor: Warp-Uniform Pattern Generation
- * ============================================================================
- *
- * A-Pattern (WM×BK blocks):
- *   - A is [M×K] row-major
- *   - Each pattern covers WM=64 rows × BK=8 columns
- *   - Bit k = 1 if ANY of WM rows has non-zero at column k
- *   - Indexed by: mBlock * numKBlocks + kBlock
- *   - Warp-uniform because all threads in warp share same warpRow
- *
- * B-Pattern (WN×BK blocks):
- *   - B is [K×N] row-major
- *   - Each pattern covers BK=8 rows × WN=32 columns
- *   - Bit k = 1 if ANY of WN columns has non-zero at row k
- *   - Indexed by: nBlock * numKBlocks + kBlock
- *   - Warp-uniform because all threads in warp share same warpCol
- *
- * Joint Pattern:
- *   joint = a_pattern & b_pattern
- *   - Bit k = 1 only if BOTH A and B have non-zeros at K-position k
- *   - Skip iteration when bit = 0: guaranteed zero contribution
- */
-
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <cstdint>
@@ -48,109 +23,41 @@ inline void free_ab_pattern_metadata(ABPatternMetadata& meta) {
 }
 
 // ============================================================================
-// A-Pattern Preprocessing Kernel (Original - WM×BK granularity)
-// ============================================================================
-
-template <const int BK, const int WM, const int NUM_THREADS>
-__global__ void preprocess_a_patterns_kernel(
-    int M, int K,
-    const float* __restrict__ A,    // [M×K] row-major
-    uint8_t* __restrict__ patterns  // [numMBlocks × numKBlocks]
-) {
-    constexpr int WARP_SIZE = 32;
-    constexpr int WARPS_PER_BLOCK = NUM_THREADS / WARP_SIZE;
-
-    const int numMBlocks = M / WM;
-    const int numKBlocks = K / BK;
-
-    const int warpId = threadIdx.x / WARP_SIZE;
-    const int laneId = threadIdx.x % WARP_SIZE;
-
-    // Each thread block processes one M-block (WM=64 rows)
-    const int mBlock = blockIdx.x;
-    if (mBlock >= numMBlocks) return;
-
-    const int globalMBase = mBlock * WM;
-
-    // Each warp processes multiple K-blocks
-    for (int kBlock = warpId; kBlock < numKBlocks; kBlock += WARPS_PER_BLOCK) {
-        const int globalKBase = kBlock * BK;
-
-        uint8_t threadPattern = 0;
-
-        // WM×BK = 64×8 = 512 elements per block
-        // 32 threads per warp → 16 elements per thread
-        constexpr int ELEMENTS_PER_THREAD = (WM * BK) / WARP_SIZE;
-
-        #pragma unroll
-        for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
-            const int flatIdx = laneId * ELEMENTS_PER_THREAD + i;
-            const int mRow = flatIdx / BK;    // Which M-row within block (0-63)
-            const int kCol = flatIdx % BK;    // Which K-col within block (0-7)
-
-            const int globalM = globalMBase + mRow;
-            const int globalK = globalKBase + kCol;
-
-            if (globalM < M && globalK < K) {
-                float val = A[globalM * K + globalK];
-                if (val != 0.0f) {
-                    threadPattern |= (1 << kCol);
-                }
-            }
-        }
-
-        // Warp-level OR reduction
-        #pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            threadPattern |= __shfl_xor_sync(0xFFFFFFFF, threadPattern, offset);
-        }
-
-        if (laneId == 0) {
-            patterns[mBlock * numKBlocks + kBlock] = threadPattern;
-        }
-    }
-}
-
-// ============================================================================
-// A-Pattern Preprocessing Kernel (8×8 granularity for true 8×32 tiles)
+// A-Pattern Preprocessing Kernel (unified for any M-tile granularity)
 // ============================================================================
 
 template <const int BK, const int TILE_M, const int NUM_THREADS>
-__global__ void preprocess_a_patterns_8x8_kernel(
+__global__ void preprocess_a_patterns_kernel(
     int M, int K,
-    const float* __restrict__ A,    // [M×K] row-major
-    uint8_t* __restrict__ patterns  // [numTileRows × numKBlocks]
+    const float* __restrict__ A,
+    uint8_t* __restrict__ patterns
 ) {
     constexpr int WARP_SIZE = 32;
     constexpr int WARPS_PER_BLOCK = NUM_THREADS / WARP_SIZE;
 
-    const int numTileRows = M / TILE_M;
+    const int numTiles = M / TILE_M;
     const int numKBlocks = K / BK;
 
     const int warpId = threadIdx.x / WARP_SIZE;
     const int laneId = threadIdx.x % WARP_SIZE;
 
-    // Each thread block processes one tile-row (TILE_M=8 rows)
-    const int tileRow = blockIdx.x;
-    if (tileRow >= numTileRows) return;
+    const int tileIdx = blockIdx.x;
+    if (tileIdx >= numTiles) return;
 
-    const int globalMBase = tileRow * TILE_M;
+    const int globalMBase = tileIdx * TILE_M;
 
-    // Each warp processes multiple K-blocks
     for (int kBlock = warpId; kBlock < numKBlocks; kBlock += WARPS_PER_BLOCK) {
         const int globalKBase = kBlock * BK;
 
         uint8_t threadPattern = 0;
 
-        // TILE_M×BK = 8×8 = 64 elements per tile
-        // 32 threads per warp → 2 elements per thread
         constexpr int ELEMENTS_PER_THREAD = (TILE_M * BK) / WARP_SIZE;
 
         #pragma unroll
         for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
             const int flatIdx = laneId * ELEMENTS_PER_THREAD + i;
-            const int mRow = flatIdx / BK;    // Which M-row within tile (0-7)
-            const int kCol = flatIdx % BK;    // Which K-col within block (0-7)
+            const int mRow = flatIdx / BK;
+            const int kCol = flatIdx % BK;
 
             const int globalM = globalMBase + mRow;
             const int globalK = globalKBase + kCol;
@@ -163,14 +70,13 @@ __global__ void preprocess_a_patterns_8x8_kernel(
             }
         }
 
-        // Warp-level OR reduction
         #pragma unroll
         for (int offset = 16; offset > 0; offset >>= 1) {
             threadPattern |= __shfl_xor_sync(0xFFFFFFFF, threadPattern, offset);
         }
 
         if (laneId == 0) {
-            patterns[tileRow * numKBlocks + kBlock] = threadPattern;
+            patterns[tileIdx * numKBlocks + kBlock] = threadPattern;
         }
     }
 }
@@ -180,10 +86,10 @@ __global__ void preprocess_a_patterns_8x8_kernel(
 // ============================================================================
 
 template <const int BK, const int WN, const int NUM_THREADS>
-__global__ void preprocess_ab_b_patterns_kernel(
+__global__ void preprocess_b_patterns_kernel(
     int K, int N,
-    const float* __restrict__ B,    // [K×N] row-major
-    uint8_t* __restrict__ patterns  // [numNBlocks × numKBlocks]
+    const float* __restrict__ B,
+    uint8_t* __restrict__ patterns
 ) {
     constexpr int WARP_SIZE = 32;
     constexpr int WARPS_PER_BLOCK = NUM_THREADS / WARP_SIZE;
@@ -304,7 +210,7 @@ ABPatternMetadata preprocess_ab_patterns(
         <<<meta.numMBlocks, NUM_THREADS>>>(M, K, d_A, meta.d_a_patterns);
 
     // Preprocess B
-    preprocess_ab_b_patterns_kernel<BK, WN, NUM_THREADS>
+    preprocess_b_patterns_kernel<BK, WN, NUM_THREADS>
         <<<meta.numNBlocks, NUM_THREADS>>>(K, N, d_B, meta.d_b_patterns);
 
     cudaEventRecord(stop);
@@ -398,11 +304,11 @@ ABPatternMetadata preprocess_ab_patterns_8x32(
     cudaEventRecord(start);
 
     // Preprocess A at 8×8 granularity
-    preprocess_a_patterns_8x8_kernel<BK, TILE_M, NUM_THREADS>
+    preprocess_a_patterns_kernel<BK, TILE_M, NUM_THREADS>
         <<<numTileRows, NUM_THREADS>>>(M, K, d_A, meta.d_a_patterns);
 
     // Preprocess B at 8×WN granularity (same as before)
-    preprocess_ab_b_patterns_kernel<BK, WN, NUM_THREADS>
+    preprocess_b_patterns_kernel<BK, WN, NUM_THREADS>
         <<<meta.numNBlocks, NUM_THREADS>>>(K, N, d_B, meta.d_b_patterns);
 
     cudaEventRecord(stop);
@@ -493,7 +399,7 @@ ABPatternMetadata preprocess_ab_patterns_32x32(
         <<<numTileRows, NUM_THREADS>>>(M, K, d_A, meta.d_a_patterns);
 
     // Preprocess B at 8×WN granularity (same as K24/K28)
-    preprocess_ab_b_patterns_kernel<BK, WN, NUM_THREADS>
+    preprocess_b_patterns_kernel<BK, WN, NUM_THREADS>
         <<<numWarpCols, NUM_THREADS>>>(K, N, d_B, meta.d_b_patterns);
 
     cudaEventRecord(stop);

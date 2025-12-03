@@ -1,28 +1,6 @@
 #pragma once
-/*
- * ============================================================================
- * Kernel: ESMM B-Sparse Warp-Granularity
- * ============================================================================
- *
- * Strategy:
- *   Use warp-granularity patterns (BK × WN blocks) to enable warp-uniform
- *   skipping of K-iterations where B matrix is sparse.
- *
- * Architecture:
- *   - Preprocessing: OR together sparsity across WN=32 columns → single 8-bit pattern
- *   - Runtime: Load pattern per warp-column, reconstruct offsets, switch on count
- *   - Computation: Template dispatch enables full loop unrolling
- *
- * Performance Characteristics:
- *   - Memory: 1 byte per 8×32 block (~64 KB for 4096×4096)
- *   - Divergence: Zero (warp-uniform pattern)
- *   - Overhead: Minimal (single byte load + bit manipulation)
- *
- * Key Difference from A-Sparse:
- *   - A-sparse: Pattern indexed by (warpRow, kBlock) - sparsity in A's columns
- *   - B-sparse: Pattern indexed by (kBlock, warpCol) - sparsity in B's rows
- *   - Both skip the SAME K-iterations (dotIdx), just different patterns
- */
+// K17: B-sparse with warp-granularity patterns (8x32 blocks)
+// Warp-uniform skipping of K-iterations based on B matrix sparsity
 
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "preprocess_params.cuh"
 #include <cuda_runtime.h>
 #include <vector>
 #include <iostream>
@@ -12,12 +11,6 @@
 
 using std::cout;
 using std::endl;
-
-struct PreprocessResult {
-  int* d_list;
-  int* h_list;
-  int totalSize;
-};
 
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
@@ -67,29 +60,17 @@ const char* get_kernel_name(int kernel_choice) {
     case 15: return "cuBLAS";
     case 16: return "ESMM A-Sparse Block-wise (Warp-Granularity Patterns)";
     case 17: return "ESMM B-Sparse Warp-Granularity (32-col, Zero-Divergence)";
-    case 18: return "ESMM B-Sparse TN-Granularity (8-col, Per Thread-Group)";
-    case 19: return "ESMM B-Transpose Sparse (K-iteration Skipping)";
-    case 20: return "ESMM B-Sparse Shared Memory Transpose (WN-granularity)";
-    case 21: return "ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)";
-    case 22: return "ESMM A+B Sparse (Joint Warp-Uniform Patterns, Zero-Divergence)";
-    case 23: return "ESMM AB-Turbo (Precomputed Joint Patterns + Warp Shuffle)";
-    case 24: return "ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)";
-    case 25: return "JOINT BASELINE (Dense, No Skipping)";
-    case 26: return "JOINT SKIP_ONLY (Skip Logic Only, No FMA)";
-    case 27: return "JOINT SKIP_FMA (Full Joint Sparse)";
-    case 28: return "ESMM A+B Sparse - 8x32 GRANULARITY";
-    case 29: return "ESMM A+B Sparse - 32x32 GRANULARITY";
+    case 19: return "ESMM B-Sparse TN-Granularity (8-col, Per Thread-Group)";
+    case 20: return "ESMM B-Sparse Warp-Uniform Pattern (WN-granularity, Zero-Divergence)";
+    case 21: return "ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop, K21 Style)";
+    case 22: return "ESMM A+B Sparse - 8x32 GRANULARITY";
+    case 23: return "ESMM A+B Sparse - 32x32 GRANULARITY";
     default: return "Unknown Kernel";
   }
 }
 
 void print_usage(const char* program_name) {
   cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
-  cout << "\nPreprocessing Verification:" << endl;
-  cout << "  0, --preprocess       Run both A and B preprocessing verification" << endl;
-  cout << "  0a, --preprocess-a    Run A matrix preprocessing verification" << endl;
-  cout << "  0b, --preprocess-b    Run B matrix preprocessing verification" << endl;
-  cout << "  [size] [runs]         Optional: matrix size (default 1024) and runs (default 10)" << endl;
   cout << "\nKernel_choice: " << endl;
   cout << "    Single kernel: 1-29 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
@@ -230,23 +211,6 @@ void randomize_matrix(float *mat, int M, int N) {
   }
 }
 
-// ============================================================================
-// UNSTRUCTURED RANDOM SPARSITY GENERATION
-// ============================================================================
-
-/*
- * Generate matrix with completely random unstructured sparsity
- *
- * Each element has an independent probability of being zero.
- * No repeating patterns - truly random sparsity distribution.
- *
- * Parameters:
- *   mat: Output matrix (M×N)
- *   M, N: Matrix dimensions
- *   sparsity_percent: Target sparsity percentage (0-100)
- *                     50.0 = 50% of elements are zero
- *   seed: Random seed for reproducibility (optional, 0 = use time)
- */
 void randomize_matrix_unstructured(float *mat, int M, int N,
                                    float sparsity_percent,
                                    unsigned int seed = 0) {
@@ -320,45 +284,6 @@ void randomize_matrix_B_unstructured(float *mat, int K, int N,
   randomize_matrix_unstructured(mat, K, N, sparsity_percent, seed);
 }
 
-/*
- * Generate BOTH A and B with independent unstructured random sparsity
- *
- * Creates truly random sparsity patterns for joint A+B testing.
- * Each matrix gets independent random sparsity.
- *
- * Expected joint density: (1-sparsity_A) × (1-sparsity_B)
- * Example: 50% × 50% = 25% joint density → 75% joint sparsity
- *
- * Parameters:
- *   mat_A: Output A matrix (M×K)
- *   mat_B: Output B matrix (K×N)
- *   M, N, K: Matrix dimensions
- *   sparsity_A: Target sparsity for A (0-100)
- *   sparsity_B: Target sparsity for B (0-100)
- *   seed: Random seed for reproducibility
- */
-void randomize_matrices_joint_unstructured(float *mat_A, float *mat_B,
-                                           int M, int N, int K,
-                                           float sparsity_A,
-                                           float sparsity_B,
-                                           unsigned int seed = 0) {
-  printf("Generating unstructured random sparsity:\n");
-
-  // Generate A with independent random sparsity
-  randomize_matrix_A_unstructured(mat_A, M, K, sparsity_A, seed);
-
-  // Generate B with independent random sparsity (different seed)
-  randomize_matrix_B_unstructured(mat_B, K, N, sparsity_B, seed ? seed + 1 : 0);
-
-  // Calculate expected joint sparsity
-  float density_A = (100.0f - sparsity_A) / 100.0f;
-  float density_B = (100.0f - sparsity_B) / 100.0f;
-  float joint_density = density_A * density_B;
-  float joint_sparsity = 100.0f * (1.0f - joint_density);
-
-  printf("Expected joint sparsity: %.1f%% × %.1f%% = %.2f%% joint density (%.2f%% joint sparsity)\n",
-         sparsity_A, sparsity_B, joint_density * 100.0f, joint_sparsity);
-}
 
 std::vector<int> stringToVector(const std::string &str) {
   std::vector<int> vec;
@@ -446,130 +371,7 @@ uint8_t computeExpandedIndicesBits(std::string_view pattern) {
 
   return resp;
 }
-void computeReferencePreprocessing(float* A, int* h_ALIST_ref, int rows, int cols,  int BM, int BK, int WMITER, int WSUBM) {
-  using P = PreprocessParams;
 
-  const int numKBlocks = cols / P::BK;
-  const int numBlockRows = rows / P::BM;
-
-  // Total number of masks and ints
-  const int numMasks = numKBlocks * P::NUM_WARP_ROWS * P::WMITER;
-  const int numInts = (numMasks + 3) / 4;
-
-  // Temporary buffer for masks
-  uint8_t* masks = new uint8_t[numMasks];
-  memset(masks, 0, numMasks);
-
-  for (int blockRow = 0; blockRow < numBlockRows; blockRow++) {
-    for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-      for (int warpRow = 0; warpRow < P::NUM_WARP_ROWS; warpRow++) {
-        for (int subRow = 0; subRow < P::WMITER; subRow++) {
-          uint8_t mask = 0;
-
-          // Check each column in the K-block
-          for (int dotIdx = 0; dotIdx < P::BK; dotIdx++) {
-            bool hasNonZero = false;
-            // Check all 32 rows for this warp sub-row
-            for (int threadRow = 0; threadRow < 32; threadRow++) {
-              int globalRow = blockRow * P::BM + warpRow * (P::BM / P::NUM_WARP_ROWS) + subRow * P::WSUBM + threadRow;
-              int globalCol = kBlock * P::BK + dotIdx;
-
-              if (A[globalRow * cols + globalCol] != 0.0f) {
-                hasNonZero = true;
-                break;
-              }
-            }
-
-            // Set bit if any value in this column is non-zero
-            if (hasNonZero) {
-              mask |= (1 << dotIdx);
-            }
-          }
-
-          // Store mask in temporary buffer
-          const int maskIdx = kBlock * P::NUM_WARP_ROWS * P::WMITER + warpRow * P::WMITER + subRow;
-          masks[maskIdx] = mask;
-        }
-      }
-    }
-
-    // Pack masks into ints (4 masks per int)
-    const int blockOffset = blockRow * numInts;
-    for (int i = 0; i < numInts; i++) {
-      int packed = 0;
-      for (int j = 0; j < 4 && (i * 4 + j) < numMasks; j++) {
-        packed |= (masks[i * 4 + j] << (j * 8));
-      }
-      h_ALIST_ref[blockOffset + i] = packed;
-    }
-  }
-
-  delete[] masks;
-}
-
-
-
-
-bool verifyPreprocessResults(int* h_ALIST, int* h_ALIST_ref, int totalSize) {
-  int* gpu = (int*)h_ALIST;
-  int* cpu = (int*)h_ALIST_ref;
-
-  bool allMatch = true;
-  int errorCount = 0;
-  const int MAX_ERRORS_TO_PRINT = 10;
-  for (int i = 0; i < totalSize; i++) {
-    if (gpu[i] != cpu[i]) {
-      if (errorCount < MAX_ERRORS_TO_PRINT) {
-        printf("Mismatch at index %d: GPU=%d, CPU=%d\n", 
-          i, gpu[i], cpu[i]);
-      }
-      errorCount++;
-      allMatch = false;
-    }
-  }
-  if (allMatch) {
-    printf("✓ VERIFICATION PASSED - All values match!\n");
-  } else {
-    printf("✗ VERIFICATION FAILED - %d mismatches found\n", errorCount);
-    if (errorCount > MAX_ERRORS_TO_PRINT) {
-      printf("  (showing first %d errors)\n", MAX_ERRORS_TO_PRINT);
-    }
-  }
-  return allMatch;
-}
-
-// Removed - old preprocessor verification (K16/K17/K19 deleted)
-/*
-bool handle_preprocessing_commands(int argc, char** argv, int size, std::string_view sparsity) {
-  std::string arg = argv[1];
-  bool success = false;
-
-  if (arg == "0a" || arg == "--preprocess-a") {
-    printf("=== A Matrix Preprocessing Verification ===\n");
-    printf("Size: %dx%d\n", size, size);
-    constexpr int runs = 1;
-    float *d_A;
-    cudaMalloc(&d_A, size * size * sizeof(float));
-    float* h_A = (float*)malloc(size * size * sizeof(float));
-    randomize_matrix_with_pattern(h_A, size, size, sparsity);
-    cudaMemcpy(d_A, h_A, size * size * sizeof(float), cudaMemcpyHostToDevice);
-    free(h_A);
-    bool verify = !(argc > 2 && strcmp(argv[2], "-n") == 0);
-    success = verify_preprocess_a(d_A, size, size, size, runs, verify);
-
-    cudaFree(d_A);
-    printf("\n%s\n", success ? "✓ PASSED" : "✗ FAILED");
-  }
-  else if (arg == "0b" || arg == "--preprocess-b") {
-    printf("=== B Matrix Preprocessing ===\n(Not implemented)\n");
-  }
-  else {
-    printf("=== Preprocessing Verification ===\n(Not implemented)\n");
-  }
-
-  exit(success ? 0 : 1);
-}
-*/
 
 
 __forceinline__ __device__ void multiply_dense(int wSubRowIdx, int wSubColIdx,
@@ -630,25 +432,6 @@ __forceinline__ __device__ void multiply_eighth(int wSubRowIdx, int wSubColIdx,
 }
 
 
-// ============================================================================
-// BLOCK-LEVEL RANDOM SPARSITY (For Testing Joint Patterns)
-// ============================================================================
-
-/*
- * Generate A matrix with BLOCK-LEVEL random sparsity in K-dimension
- *
- * Key difference from unstructured sparsity:
- * - Sparsity is applied at BK=8 block granularity
- * - Each block is either fully dense or fully zero
- * - Within a warp (WM=64 rows), all rows share same K-block pattern
- * - This creates WARP-UNIFORM patterns suitable for K16/K17/K27
- *
- * Example: 50% block sparsity with BK=8
- *   Pattern: 11110000 10100000 11010000 ... (random per K-block)
- *   Each '0' means an entire 8-column block is zero
- *
- * Use case: Test joint sparsity with INDEPENDENT A and B patterns
- */
 template <int BK = 8, int WM = 64>
 void randomize_matrix_A_blocklevel(float *mat, int M, int K,
                                           float block_sparsity_percent,
@@ -661,7 +444,6 @@ void randomize_matrix_A_blocklevel(float *mat, int M, int K,
 
     for (int mBlock = 0; mBlock < numMBlocks; mBlock++) {
         for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-            // Generate a FRESH pattern for THIS specific (mBlock, kBlock) tile
             uint8_t tile_pattern = 0;
             for (int bit = 0; bit < BK; bit++) {
                 if ((float)rand() / RAND_MAX >= sparsity_threshold) {
@@ -669,7 +451,6 @@ void randomize_matrix_A_blocklevel(float *mat, int M, int K,
                 }
             }
             
-            // Apply pattern to all WM rows in this M-block
             for (int row = 0; row < WM; row++) {
                 const int globalM = mBlock * WM + row;
                 if (globalM >= M) break;
@@ -691,9 +472,6 @@ void randomize_matrix_A_blocklevel(float *mat, int M, int K,
     }
 }
 
-// FIXED: K-dimension patterns must be CONSISTENT across all N-blocks
-// For joint sparsity kernels (K22-K27), the B matrix pattern represents
-// "which K-rows have non-zeros". This must be the same across all columns!
 template <int BK = 8, int WN = 32>
 void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
                                           float block_sparsity_percent,
@@ -704,7 +482,6 @@ void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
     const int numNBlocks = N / WN;
     const float sparsity_threshold = block_sparsity_percent / 100.0f;
 
-    // Pre-generate ONE pattern per K-block (shared across all N-blocks)
     std::vector<uint8_t> k_patterns(numKBlocks);
     for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
         uint8_t pattern = 0;
@@ -716,12 +493,10 @@ void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
         k_patterns[kBlock] = pattern;
     }
 
-    // Apply the SAME K-pattern to ALL N-blocks
     for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
         for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
             const uint8_t tile_pattern = k_patterns[kBlock];  // SAME for all N-blocks
 
-            // Apply pattern to all WN columns in this N-block
             for (int col = 0; col < WN; col++) {
                 const int globalN = nBlock * WN + col;
                 if (globalN >= N) break;
@@ -742,20 +517,11 @@ void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
     }
 }
 
-// ============================================================================
-// 8-ROW GRANULARITY GENERATION (For K28 - True 8×32 tiles)
-// ============================================================================
-
 /*
  * Generate A matrix with 8-row granularity random sparsity
- *
- * For 8×32 granularity kernels (K28):
- * - Each 8-row tile gets an independent random pattern
- * - Different from WM=64 which applies same pattern to all 64 rows
- * - More realistic: adjacent 8-row groups can have different sparsity
  */
 template <int BK = 8, int TILE_M = 8>
-void randomize_matrix_A_8row(float *mat, int M, int K,
+void randomize_matrix_A(float *mat, int M, int K,
                               float block_sparsity_percent,
                               unsigned int seed = 0) {
     if (seed != 0) srand(seed);
@@ -796,51 +562,7 @@ void randomize_matrix_A_8row(float *mat, int M, int K,
     }
 }
 
-// ============================================================================
-// A-Matrix Blockwise 32-row Granularity (For K29)
-// ============================================================================
 
-template <int BK = 8, int TILE_M = 32>
-void randomize_matrix_A_32row(float *mat, int M, int K,
-                              float block_sparsity_percent,
-                              unsigned int seed = 0) {
-    if (seed != 0) srand(seed);
-
-    const int numKBlocks = K / BK;
-    const int numTileRows = M / TILE_M;
-    const float sparsity_threshold = block_sparsity_percent / 100.0f;
-
-    for (int tileRow = 0; tileRow < numTileRows; tileRow++) {
-        for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-            // Generate independent random pattern for EACH 32-row tile
-            uint8_t tile_pattern = 0;
-            for (int bit = 0; bit < BK; bit++) {
-                if ((float)rand() / RAND_MAX >= sparsity_threshold) {
-                    tile_pattern |= (1 << bit);
-                }
-            }
-
-            // Apply pattern to these 32 rows
-            for (int row = 0; row < TILE_M; row++) {
-                const int globalM = tileRow * TILE_M + row;
-                if (globalM >= M) break;
-
-                for (int k = 0; k < BK; k++) {
-                    const int globalK = kBlock * BK + k;
-                    if (globalK >= K) break;
-
-                    const bool is_dense = (tile_pattern & (1 << k));
-                    if (is_dense) {
-                        float val = (float)(rand() % 5) + 0.01f * (rand() % 5);
-                        mat[globalM * K + globalK] = (rand() % 2) ? val : -val;
-                    } else {
-                        mat[globalM * K + globalK] = 0.0f;
-                    }
-                }
-            }
-        }
-    }
-}
 
 // ============================================================================
 // FIXED PATTERN BLOCK-LEVEL GENERATION (For K22-K27)
@@ -851,11 +573,8 @@ void randomize_matrix_A_32row(float *mat, int M, int K,
  *
  * Unlike randomize_matrix_A_blocklevel which generates random patterns,
  * this function applies the SAME user-specified pattern to ALL K-blocks.
- *
- * Use case: K22-K27 joint sparsity kernels with --blockwise flag
- *           User specifies pattern "11110000" → all K-blocks use this pattern
  */
-template <int BK = 8, int WM = 64>
+template <int BK = 8, int WM = 32>
 void randomize_matrix_A_blocklevel_pattern(float *mat, int M, int K,
                                            std::string_view pattern,
                                            unsigned int seed = 0) {
@@ -911,8 +630,6 @@ void randomize_matrix_B_blocklevel_pattern(float *mat, int K, int N,
 
     for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
         for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-            // Use FIXED pattern for ALL K-blocks (not random)
-            // Apply pattern to all WN columns in this N-block
             for (int col = 0; col < WN; col++) {
                 const int globalN = nBlock * WN + col;
                 if (globalN >= N) break;

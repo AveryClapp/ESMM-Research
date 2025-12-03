@@ -1,28 +1,7 @@
 #pragma once
 
-/*
- * ============================================================================
- * Kernel 28: ESMM A+B Sparse - 8×32 GRANULARITY
- * ============================================================================
- *
- * TRUE 8×32 TILE GRANULARITY: Each 8-row sub-tile has independent pattern
- *
- * KEY DESIGN:
- * - WM=32, WN=64: Each warp processes 32 rows × 64 cols
- * - WMITER=4: Warp iterates over 4 sub-tiles of 8 rows each
- * - WNITER=2: Warp iterates over 2 sub-tiles of 32 cols each
- * - Total: 8 sub-tiles of 8×32 per warp
- *
- * PATTERN GRANULARITY:
- * - A patterns: indexed by (tileRow, kBlock) where tileRow is 8-row tile
- * - B patterns: indexed by (warpCol, kBlock) - already 8×WN granularity
- * - Each WMITER iteration uses a DIFFERENT A-pattern for its 8-row sub-tile
- *
- * REALISTIC WORKLOADS:
- * - Adjacent 8-row groups can have different sparsity patterns
- * - More fine-grained skipping than coarse WM×BK patterns
- * - Better matches real-world sparse matrix distributions
- */
+// K28: Joint A+B sparsity, 8x32 tile granularity
+// Each 8-row sub-tile has independent pattern (WMITER=4 gives 4 patterns per warp)
 
 #include <cuda_runtime.h>
 #include <cstdint>
@@ -67,15 +46,10 @@ esmm_ab_8x32(
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    // Shared memory: A tile, B tile, AND precomputed joint patterns
     __shared__ float As[BK * (BM + 1)];  // Padded to avoid bank conflicts
     __shared__ float Bs[BK * BN];
-    // Each warp needs WMITER patterns per K-block (one per 8-row sub-tile)
     __shared__ uint8_t joint_smem[NUM_WARPS * WMITER * 1024];
 
-    // ========================================================================
-    // OPTIMIZATION: Precompute ALL joint patterns at kernel start (8×32 granularity)
-    // ========================================================================
     {
         const uint globalMBlock = cRow;
         const uint globalNBlock = cCol;
@@ -126,9 +100,6 @@ esmm_ab_8x32(
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
 
-    // ========================================================================
-    // K-LOOP with 8×32 granularity pattern checking
-    // ========================================================================
     for (uint bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
@@ -182,8 +153,8 @@ esmm_ab_8x32(
         // ====================================================================
         // INNER LOOP: 8×32 granularity with per-sub-tile pattern checking
         // ====================================================================
-        float regM[WMITER * TM];
-        float regN[WNITER * TN];
+        //float regM[WMITER * TM];
+        //float regN[WNITER * TN];
 
         // Iterate over WMITER (M-iterations) and WNITER (N-iterations)
         #pragma unroll
@@ -222,14 +193,10 @@ esmm_ab_8x32(
     }
 
     // Write results back to C
-    #pragma unroll
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
-        #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             float* C_sub = C + wSubRowIdx * WSUBM * N + wSubColIdx * WSUBN;
-            #pragma unroll
             for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
-                #pragma unroll
                 for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
                     float4 tmp;
                     const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +

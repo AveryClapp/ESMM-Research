@@ -1,26 +1,7 @@
 #pragma once
 
-/*
- * ============================================================================
- * Kernel 20: ESMM Block-wise Uniform
- * ============================================================================
- *
- * Strategy:
- *   Each 8×32 block (BK × WM) encodes one sparsity pattern. This aligns
- *   perfectly with warp execution: 32 threads process 32 rows together,
- *   sharing the same pattern for optimal compile-time unrolling.
- *
- * Architecture:
- *   - Preprocessing: OR together sparsity across 32 rows → single 8-bit pattern
- *   - Runtime: Load pattern, reconstruct offsets, switch on count
- *   - Computation: Template dispatch enables full loop unrolling
- *
- * Performance Characteristics:
- *   - Memory: 1 byte per 8×32 block (~64 KB for 4096×4096)
- *   - Divergence: Zero (warp-uniform pattern)
- *   - Overhead: Minimal (single byte load + bit manipulation)
- *
- */
+// K16: A-sparse with block-wise uniform patterns (8x32 blocks)
+// OR pattern across 32 rows for warp-uniform execution
 
 #include "../../include/utils.cuh"
 #include "../../include/metadata.cuh"

@@ -46,7 +46,7 @@ __global__ void preprocess_blockwise_patterns(
     for (int kBlockBatch = 0; kBlockBatch < numKBlocks; kBlockBatch += 4) {
         constexpr int LOADS_PER_THREAD = (TILE_M * TILE_K) / NUM_THREADS;
 
-#pragma unroll
+        #pragma unroll
         for (int i = 0; i < LOADS_PER_THREAD; i++) {
             const int flatIdx = threadIdx.x + i * NUM_THREADS;
             const int row = flatIdx / TILE_K;
@@ -60,13 +60,12 @@ __global__ void preprocess_blockwise_patterns(
 
         __syncthreads();
 
-#pragma unroll
+        #pragma unroll
         for (int kb = 0; kb < 4 && (kBlockBatch + kb) < numKBlocks; kb++) {
             uint8_t threadPattern = 0;
-
             const int kOffset = kb * BK;
 
-#pragma unroll
+            #pragma unroll
             for (int k = 0; k < 8; k++) {
                 if (smem[kOffset + k][laneId] != 0.0f) {
                     threadPattern |= (1 << k);
@@ -75,7 +74,7 @@ __global__ void preprocess_blockwise_patterns(
 
             uint8_t warpPattern = threadPattern;
 
-#pragma unroll
+            #pragma unroll
             for (int offset = 16; offset > 0; offset >>= 1) {
                 warpPattern |= __shfl_xor_sync(0xFFFFFFFF, warpPattern, offset);
             }

@@ -842,13 +842,23 @@ bool run_esmm_a_sparse_blockwise_skip(int rows, int cols, int inners, float *d_A
 
 bool run_esmm_a_sparse_blockwise_skip_no_check(int rows, int cols, int inners, float *d_A,
                                float *d_B, float *d_C, int runs) {
+  //  const uint NUM_THREADS = 128;
+  //const uint BN = 128;
+  //const uint BM = 64;
+  //const uint BK = 8;
+  //const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
   // BEST CONFIG from tuner: 5.488 ms (4096x4096, 50% sparse)
   const uint NUM_THREADS = 128;
   const uint BM = 64;
   const uint BN = 128;
   const uint BK = 8;
-  const uint WM = 32;  // ✓ Matches preprocessor
-  const uint WN = 64;
+  const uint WM = 64;  // ✓ Matches preprocessor
+  const uint WN = 32;
   const uint WNITER = 2;
   const uint TM = 1;
   const uint TN = 8;

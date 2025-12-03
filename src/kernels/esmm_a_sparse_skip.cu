@@ -37,8 +37,6 @@ __global__ void __launch_bounds__(NUM_THREADS)
     __shared__ float As[(BM + 1) * BK];
     __shared__ float Bs[BN * BK];
 
-    float regM[WMITER * TM];
-    float regN[WNITER * TN];
 
     A += cRow * BM * K;
     B += cCol * BN;
@@ -52,20 +50,23 @@ __global__ void __launch_bounds__(NUM_THREADS)
     constexpr uint rowStrideB = NUM_THREADS / (BN / 4);
 
     float threadResults[WMITER * TM * WNITER * TN] = {0.0};
+    float regM[WMITER * TM];
+    float regN[WNITER * TN];
 
     const uint globalWarpRow = cRow * (BM / WM) + warpRow;
 
     for (int32_t bkIdx = 0; bkIdx < K; bkIdx += BK) {
         const uint kBlock = bkIdx / BK;
 
-        const uint blockId = globalWarpRow * numKBlocks + kBlock;
-        const uint8_t a_pattern = blockPatterns[blockId];
+        const uint8_t a_pattern = blockPatterns[globalWarpRow * numKBlocks + kBlock];
 
+        /*
         if (!__popc(a_pattern)) {
             A += BK;
             B += BK * N;
             continue;
         }
+        */
 
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(
@@ -99,22 +100,16 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
         // Load from shared memory B
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-            regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-            regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-            regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-            regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-            regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-            regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-            regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-            regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol *
-                WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+            const uint bBase = (dotIdx * BN) + warpCol * WN +
+                wSubColIdx * WSUBN + threadColInWarp * TN;
+            regN[wSubColIdx * TN + 0] = Bs[bBase + 0];
+            regN[wSubColIdx * TN + 1] = Bs[bBase + 1];
+            regN[wSubColIdx * TN + 2] = Bs[bBase + 2];
+            regN[wSubColIdx * TN + 3] = Bs[bBase + 3];
+            regN[wSubColIdx * TN + 4] = Bs[bBase + 4];
+            regN[wSubColIdx * TN + 5] = Bs[bBase + 5];
+            regN[wSubColIdx * TN + 6] = Bs[bBase + 6];
+            regN[wSubColIdx * TN + 7] = Bs[bBase + 7];
         }
 
         // Compute outer product
@@ -122,8 +117,16 @@ __global__ void __launch_bounds__(NUM_THREADS)
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             #pragma unroll
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                multiply_dense(wSubRowIdx, wSubColIdx, WNITER,
-                    regM[wSubRowIdx], regN, threadResults);
+                const float aVal = regM[wSubRowIdx * TM + 0];
+                const int resBase = (wSubRowIdx * WNITER + wSubColIdx) * TN;
+                threadResults[resBase + 0] += aVal * regN[wSubColIdx * TN + 0];
+                threadResults[resBase + 1] += aVal * regN[wSubColIdx * TN + 1];
+                threadResults[resBase + 2] += aVal * regN[wSubColIdx * TN + 2];
+                threadResults[resBase + 3] += aVal * regN[wSubColIdx * TN + 3];
+                threadResults[resBase + 4] += aVal * regN[wSubColIdx * TN + 4];
+                threadResults[resBase + 5] += aVal * regN[wSubColIdx * TN + 5];
+                threadResults[resBase + 6] += aVal * regN[wSubColIdx * TN + 6];
+                threadResults[resBase + 7] += aVal * regN[wSubColIdx * TN + 7];
             }
         }
     }
@@ -134,22 +137,33 @@ __global__ void __launch_bounds__(NUM_THREADS)
         __syncthreads();
     }
 
+    #pragma unroll
     for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+        #pragma unroll
         for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
             float *C_interim = C + (wSubRowIdx * WSUBM) * N + wSubColIdx * WSUBN;
+
+            #pragma unroll
             for (uint resIdxM = 0; resIdxM < TM; resIdxM += 1) {
-                for (uint resIdxN = 0; resIdxN < TN; resIdxN += 4) {
-                    float4 tmp;
-                    const int i = (wSubRowIdx * TM + resIdxM) * (WNITER * TN) +
-                        wSubColIdx * TN + resIdxN;
-                    tmp.x = threadResults[i + 0];
-                    tmp.y = threadResults[i + 1];
-                    tmp.z = threadResults[i + 2];
-                    tmp.w = threadResults[i + 3];
-                    reinterpret_cast<float4 *>(
-                        &C_interim[(threadRowInWarp * TM + resIdxM) * N +
-                        threadColInWarp * TN + resIdxN])[0] = tmp;
-                }
+                const int resBase = (wSubRowIdx * WNITER + wSubColIdx) * TN;
+
+                float4 tmp;
+                tmp.x = threadResults[resBase + 0];
+                tmp.y = threadResults[resBase + 1];
+                tmp.z = threadResults[resBase + 2];
+                tmp.w = threadResults[resBase + 3];
+                reinterpret_cast<float4*>(
+                    &C_interim[(threadRowInWarp * TM + resIdxM) * N + 
+                    threadColInWarp * TN + 0])[0] = tmp;
+                
+                tmp.x = threadResults[resBase + 4];
+                tmp.y = threadResults[resBase + 5];
+                tmp.z = threadResults[resBase + 6];
+                tmp.w = threadResults[resBase + 7];
+                reinterpret_cast<float4*>(
+                    &C_interim[(threadRowInWarp * TM + resIdxM) * N + 
+                    threadColInWarp * TN + 4])[0] = tmp;
+
             }
         }
     }

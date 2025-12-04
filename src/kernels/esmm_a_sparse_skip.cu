@@ -60,13 +60,12 @@ __global__ void __launch_bounds__(NUM_THREADS)
 
         const uint8_t a_pattern = blockPatterns[globalWarpRow * numKBlocks + kBlock];
 
-        /*
+        // Skip entire BK tile if completely zero
         if (!__popc(a_pattern)) {
             A += BK;
             B += BK * N;
             continue;
         }
-        */
 
         for (int32_t offset = 0; offset + rowStrideA <= BM; offset += rowStrideA) {
             const float4 tmp = reinterpret_cast<const float4 *>(

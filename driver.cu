@@ -323,7 +323,8 @@ int main(int argc, char *argv[]) {
         float block_sparsity_percent = 100.0f - density_percent;
 
         for (int k : kernel_choices) {
-            if (k == 21) { 
+            if (k == 21) {
+                // K21: 8-row A granularity for symmetric 8×32 approach
                 randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent, random_seed);
             }
             else if (k == 22) {
@@ -333,7 +334,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Generate A with appropriate granularity
+        // Generate B with appropriate granularity
         randomize_matrix_B_blocklevel_fixed<8, 32>(h_B, inners, cols, block_sparsity_percent, random_seed + 1);
 
         if (verbose) {

@@ -116,36 +116,27 @@ esmm_ab_8x32(
             joints[m] = __shfl_sync(0xFFFFFFFF, joints[m], 0);
         }
 
-        // Check if ALL sub-tiles are zero for this K-block
-        uint8_t any_nonzero = 0;
-        #pragma unroll
-        for (int m = 0; m < WMITER; ++m) {
-            any_nonzero |= joints[m];
-        }
-
-        if (any_nonzero == 0) {
-            A += BK;
-            B += BK * N;
-            continue;
-        }
-
         // Load tiles into shared memory
         #pragma unroll
         for (uint offset = 0; offset < BM; offset += rowStrideA) {
-            float4 tmp = reinterpret_cast<const float4*>(
-                &A[(innerRowA + offset) * K + innerColA * 4])[0];
-            As[(innerColA * 4 + 0) * (BM + 1) + innerRowA + offset] = tmp.x;
-            As[(innerColA * 4 + 1) * (BM + 1) + innerRowA + offset] = tmp.y;
-            As[(innerColA * 4 + 2) * (BM + 1) + innerRowA + offset] = tmp.z;
-            As[(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
+            if (innerRowA + offset < BM) {
+                float4 tmp = reinterpret_cast<const float4*>(
+                    &A[(innerRowA + offset) * K + innerColA * 4])[0];
+                As[(innerColA * 4 + 0) * (BM + 1) + innerRowA + offset] = tmp.x;
+                As[(innerColA * 4 + 1) * (BM + 1) + innerRowA + offset] = tmp.y;
+                As[(innerColA * 4 + 2) * (BM + 1) + innerRowA + offset] = tmp.z;
+                As[(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
+            }
         }
 
         #pragma unroll
         for (uint offset = 0; offset < BK; offset += rowStrideB) {
-            reinterpret_cast<float4*>(
-                &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
-                reinterpret_cast<const float4*>(
-                    &B[(innerRowB + offset) * N + innerColB * 4])[0];
+            if (innerRowB + offset < BK) {
+                reinterpret_cast<float4*>(
+                    &Bs[(innerRowB + offset) * BN + innerColB * 4])[0] =
+                    reinterpret_cast<const float4*>(
+                        &B[(innerRowB + offset) * N + innerColB * 4])[0];
+            }
         }
 
         __syncthreads();

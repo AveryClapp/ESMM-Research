@@ -176,6 +176,20 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_a_sparse_blockwise_skip_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 24: // ESMM A+B Fused (Persistent Pattern Extraction)
+        if (check_results) {
+            res = run_esmm_ab_fused(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_fused_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 25: // ESMM A+B Simple Fused (Preprocessing + K20)
+        if (check_results) {
+            res = run_esmm_ab_simple_fused(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_simple_fused_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -271,10 +285,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Validate all kernel choices are in valid range (1-29)
+    // Validate all kernel choices are in valid range (1-25)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 23) {
-            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-29." << endl;
+        if (k < 1 || k > 25) {
+            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-25." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
         }

@@ -243,6 +243,7 @@ esmm_ab_compute_inline(
 
         #pragma unroll
         for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
+            // Every thread executes this together
             if (!(joint & (1 << dotIdx))) {
                 continue;
             }

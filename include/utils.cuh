@@ -87,7 +87,9 @@ void print_usage(const char* program_name) {
   cout << "    --random, -r: Use random unstructured sparsity (default: pattern-based)" << endl;
   cout << "    --blockwise, -b: Use block-level sparsity (warp-uniform patterns at BK=8 granularity)" << endl;
   cout << "    --size <N>, -s <N>: Set matrix dimensions to NxNxN (default: 4096)" << endl;
-  cout << "    --pattern <P>, -p <P>: Set 8-bit sparsity pattern (default: \"11000000\")" << endl;
+  cout << "    --pattern <P>, -p <P>: Set 8-bit sparsity pattern for both A and B (default: \"11000000\")" << endl;
+  cout << "    --pattern-a <P>, -pa <P>: Set 8-bit sparsity pattern for A matrix only" << endl;
+  cout << "    --pattern-b <P>, -pb <P>: Set 8-bit sparsity pattern for B matrix only" << endl;
   cout << "    --help, -h: Show this help message" << endl;
   cout << endl;
   cout << "Sparsity Modes:" << endl;
@@ -105,8 +107,9 @@ void print_usage(const char* program_name) {
   cout << "  " << program_name << " 13 1 --random --verbose  # Test with random sparsity" << endl;
   cout << "  " << program_name << " 10 5 -r -v  # Short form with random sparsity" << endl;
   cout << "  " << program_name << " 17 1 --size 2048 --pattern 10101010  # Custom size and pattern" << endl;
-  cout << "  " << program_name << " 22 5 -s 8192 -p 11110000 -v  # 50% sparsity, 8192x8192" << endl;
-  cout << "  " << program_name << " 24-27 1 -b -p 11110000 -v  # Block-level A+B sparsity experiment" << endl;
+  cout << "  " << program_name << " 22 5 -s 8192 -p 11110000 -v  # 50% sparsity both A&B, 8192x8192" << endl;
+  cout << "  " << program_name << " 24 1 -b -pa 11100000 -pb 11110000 -v  # 62.5% A, 50% B block-level sparsity" << endl;
+  cout << "  " << program_name << " 24-27 1 -b --pattern-a 11111000 --pattern-b 11000000 -v  # 37.5% A, 25% B" << endl;
 }
 
 

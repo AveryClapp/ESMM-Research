@@ -213,6 +213,8 @@ int main(int argc, char *argv[]) {
     int cols = 4096;
     int inners = 4096;
     std::string sparsity = "11000000";
+    std::string sparsity_a = "";  // Empty means use 'sparsity'
+    std::string sparsity_b = "";  // Empty means use 'sparsity'
 
     // Default values
     std::vector<int> kernel_choices = {17};
@@ -267,6 +269,42 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
             }
+        } else if (arg == "--pattern-a" || arg == "-pa") {
+            if (i + 1 >= argc) {
+                cout << "Error: --pattern-a requires an argument" << endl;
+                print_usage(argv[0]);
+                return 1;
+            }
+            sparsity_a = argv[++i];
+            // Validate pattern
+            if (sparsity_a.length() != 8) {
+                cout << "Error: Pattern must be exactly 8 characters (e.g., '11000000')" << endl;
+                return 1;
+            }
+            for (char c : sparsity_a) {
+                if (c != '0' && c != '1') {
+                    cout << "Error: Pattern must contain only '0' and '1' characters" << endl;
+                    return 1;
+                }
+            }
+        } else if (arg == "--pattern-b" || arg == "-pb") {
+            if (i + 1 >= argc) {
+                cout << "Error: --pattern-b requires an argument" << endl;
+                print_usage(argv[0]);
+                return 1;
+            }
+            sparsity_b = argv[++i];
+            // Validate pattern
+            if (sparsity_b.length() != 8) {
+                cout << "Error: Pattern must be exactly 8 characters (e.g., '11000000')" << endl;
+                return 1;
+            }
+            for (char c : sparsity_b) {
+                if (c != '0' && c != '1') {
+                    cout << "Error: Pattern must contain only '0' and '1' characters" << endl;
+                    return 1;
+                }
+            }
         } else if (i == 1) {
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
                 kernel_choices = parse_kernel_selection(arg);
@@ -294,6 +332,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // If separate A/B patterns not specified, use the unified pattern
+    if (sparsity_a.empty()) sparsity_a = sparsity;
+    if (sparsity_b.empty()) sparsity_b = sparsity;
+
     if (verbose) {
         cout << "Matrix dimensions: " << rows << "x" << cols << " * " << cols << "x" << inners << endl;
         cout << "Number of runs per kernel: " << runs << endl;
@@ -301,14 +343,24 @@ int main(int argc, char *argv[]) {
 
         if (use_blockwise_sparsity) {
             cout << "Sparsity mode: BLOCK-LEVEL (warp-uniform patterns)" << endl;
-            cout << "  Block sparsity: " << sparsity << " (applied at BK=8 granularity)" << endl;
+            if (sparsity_a == sparsity_b) {
+                cout << "  Block sparsity: " << sparsity_a << " (applied at BK=8 granularity)" << endl;
+            } else {
+                cout << "  A-matrix pattern: " << sparsity_a << " (applied at BK=8 granularity)" << endl;
+                cout << "  B-matrix pattern: " << sparsity_b << " (applied at BK=8 granularity)" << endl;
+            }
         } else if (use_random_sparsity) {
             cout << "Sparsity mode: RANDOM (unstructured)" << endl;
             cout << "  Random sparsity: " << random_sparsity_percent << "%" << endl;
             cout << "  Random seed: " << random_seed << endl;
         } else {
             cout << "Sparsity mode: PATTERN-BASED (column-wise)" << endl;
-            cout << "  Pattern: " << sparsity << endl;
+            if (sparsity_a == sparsity_b) {
+                cout << "  Pattern: " << sparsity_a << endl;
+            } else {
+                cout << "  A-matrix pattern: " << sparsity_a << endl;
+                cout << "  B-matrix pattern: " << sparsity_b << endl;
+            }
         }
 
         cout << "Kernels to run: ";
@@ -328,37 +380,51 @@ int main(int argc, char *argv[]) {
     if (use_blockwise_sparsity) {
         if (verbose) cout << "Generating block-level sparsity patterns..." << endl;
 
-        // Parse sparsity percentage from pattern (count 1s)
-        int ones_count = 0;
-        for (char c : sparsity) {
-            if (c == '1') ones_count++;
+        // Parse sparsity percentage from pattern for A matrix (count 1s)
+        int ones_count_a = 0;
+        for (char c : sparsity_a) {
+            if (c == '1') ones_count_a++;
         }
-        float density_percent = (ones_count / 8.0f) * 100.0f;
-        float block_sparsity_percent = 100.0f - density_percent;
+        float density_percent_a = (ones_count_a / 8.0f) * 100.0f;
+        float block_sparsity_percent_a = 100.0f - density_percent_a;
+
+        // Parse sparsity percentage from pattern for B matrix (count 1s)
+        int ones_count_b = 0;
+        for (char c : sparsity_b) {
+            if (c == '1') ones_count_b++;
+        }
+        float density_percent_b = (ones_count_b / 8.0f) * 100.0f;
+        float block_sparsity_percent_b = 100.0f - density_percent_b;
 
         for (int k : kernel_choices) {
             if (k == 21) {
                 // K21: 8-row A granularity for symmetric 8×32 approach
-                randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent, random_seed);
+                randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent_a, random_seed);
             }
             else if (k == 22) {
-                randomize_matrix_A<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
+                randomize_matrix_A<8, 32>(h_A, rows, inners, block_sparsity_percent_a, random_seed);
             } else {
-                randomize_matrix_A_blocklevel<8, 32>(h_A, rows, inners, block_sparsity_percent, random_seed);
+                randomize_matrix_A_blocklevel<8, 32>(h_A, rows, inners, block_sparsity_percent_a, random_seed);
             }
         }
 
         // Generate B with appropriate granularity
-        randomize_matrix_B_blocklevel_fixed<8, 32>(h_B, inners, cols, block_sparsity_percent, random_seed + 1);
+        randomize_matrix_B_blocklevel_fixed<8, 32>(h_B, inners, cols, block_sparsity_percent_b, random_seed + 1);
 
         if (verbose) {
-            cout << "Block-level sparsity generated (target: " << block_sparsity_percent << "%)" << endl;
+            if (block_sparsity_percent_a == block_sparsity_percent_b) {
+                cout << "Block-level sparsity generated (target: " << block_sparsity_percent_a << "%)" << endl;
+            } else {
+                cout << "Block-level sparsity generated:" << endl;
+                cout << "  A-matrix: " << block_sparsity_percent_a << "% sparsity (" << density_percent_a << "% density)" << endl;
+                cout << "  B-matrix: " << block_sparsity_percent_b << "% sparsity (" << density_percent_b << "% density)" << endl;
+            }
         }
     } else if (use_random_sparsity) {
         randomize_matrix_unstructured(h_A, rows, inners, random_sparsity_percent, random_seed);
         randomize_matrix_unstructured(h_B, inners, cols, random_sparsity_percent, random_seed + 1);
     } else {
-        randomize_matrix_with_pattern(h_A, rows, inners, sparsity);
+        randomize_matrix_with_pattern(h_A, rows, inners, sparsity_a);
         bool use_b_kdim = false;
         for (size_t i = 0; i < kernel_choices.size(); i++) {
             int k = kernel_choices[i];
@@ -368,9 +434,9 @@ int main(int argc, char *argv[]) {
             }
         }
         if (use_b_kdim) {
-            randomize_matrix_B_kdim_pattern(h_B, inners, cols, sparsity);
+            randomize_matrix_B_kdim_pattern(h_B, inners, cols, sparsity_b);
         } else {
-            randomize_matrix_with_pattern(h_B, inners, cols, sparsity);
+            randomize_matrix_with_pattern(h_B, inners, cols, sparsity_b);
         }
     }
     memset(h_C, 0, rows * cols * sizeof(float));

@@ -9,6 +9,7 @@ Usage:
     ./scripts/benchmark.py --kernel 17
     ./scripts/benchmark.py -k 17,22,23 --sizes 1024,2048 --parallel 2
     ./scripts/benchmark.py -k 17 --cold-start  # For cold-start measurements
+    ./scripts/benchmark.py -k 24 -pa 11110000 -pb 11000000 -b  # Specific A/B patterns
 """
 
 import argparse
@@ -64,6 +65,18 @@ Examples:
         help="Sparsity patterns (comma-separated 8-bit strings, default: 100%%,50%%,25%%,12.5%%)",
     )
     parser.add_argument(
+        "-pa",
+        "--pattern-a",
+        default=None,
+        help="A-matrix sparsity pattern (8-bit string, overrides --sparsity for A)",
+    )
+    parser.add_argument(
+        "-pb",
+        "--pattern-b",
+        default=None,
+        help="B-matrix sparsity pattern (8-bit string, overrides --sparsity for B)",
+    )
+    parser.add_argument(
         "--parallel",
         type=int,
         default=1,
@@ -112,6 +125,12 @@ Examples:
         "--blockwise",
         action="store_true",
         help="Use block-level sparsity (warp-uniform patterns at BK=8 granularity)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Pass --verbose flag to executable for detailed output",
     )
 
     return parser.parse_args()
@@ -301,17 +320,33 @@ def run_ncu_profile(config):
         str(args.runs),  # Number of runs
         "--size",
         str(size),
-        "--pattern",
-        sparsity_pattern,
         "--no-check",  # Skip verification for speed
     ]
+
+    # Add pattern flags - use separate A/B patterns if specified, otherwise unified pattern
+    if args.pattern_a or args.pattern_b:
+        # Use separate A/B patterns
+        pattern_a = args.pattern_a if args.pattern_a else sparsity_pattern
+        pattern_b = args.pattern_b if args.pattern_b else sparsity_pattern
+        cmd.extend(["--pattern-a", pattern_a])
+        cmd.extend(["--pattern-b", pattern_b])
+    else:
+        # Use unified pattern
+        cmd.extend(["--pattern", sparsity_pattern])
 
     # Add blockwise flag if requested
     if args.blockwise:
         cmd.append("--blockwise")
 
+    # Add verbose flag if requested
+    if args.verbose:
+        cmd.append("--verbose")
+
     mode = "BLOCKWISE" if args.blockwise else "PATTERN"
-    print(f"[Running] Kernel {kernel}, Size {size}, Sparsity {sparsity_label} ({mode})")
+    if args.pattern_a or args.pattern_b:
+        print(f"[Running] Kernel {kernel}, Size {size}, A:{args.pattern_a or sparsity_pattern}, B:{args.pattern_b or sparsity_pattern} ({mode})")
+    else:
+        print(f"[Running] Kernel {kernel}, Size {size}, Sparsity {sparsity_label} ({mode})")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -642,13 +677,33 @@ def main():
 
     # Generate all configurations
     configs = []
-    for kernel in kernels:
-        for size in sizes:
-            for sparsity_label, sparsity_pattern in sparsity_patterns.items():
+
+    # If using separate A/B patterns, only run once per (kernel, size) - don't iterate over sparsity patterns
+    if args.pattern_a or args.pattern_b:
+        pattern_a = args.pattern_a if args.pattern_a else "11000000"
+        pattern_b = args.pattern_b if args.pattern_b else "11000000"
+
+        # Calculate density for labeling
+        density_a = pattern_a.count('1') / 8.0 * 100
+        density_b = pattern_b.count('1') / 8.0 * 100
+        sparsity_label = f"A{density_a:.0f}_B{density_b:.0f}"
+
+        for kernel in kernels:
+            for size in sizes:
                 output_file = output_dir / f"k{kernel}_{size}_{sparsity_label}.ncu-rep"
+                # Use pattern_a as placeholder (actual A/B patterns added in run_ncu_profile)
                 configs.append(
-                    (kernel, size, sparsity_label, sparsity_pattern, output_file, args)
+                    (kernel, size, sparsity_label, pattern_a, output_file, args)
                 )
+    else:
+        # Standard mode: iterate over sparsity patterns
+        for kernel in kernels:
+            for size in sizes:
+                for sparsity_label, sparsity_pattern in sparsity_patterns.items():
+                    output_file = output_dir / f"k{kernel}_{size}_{sparsity_label}.ncu-rep"
+                    configs.append(
+                        (kernel, size, sparsity_label, sparsity_pattern, output_file, args)
+                    )
 
     print(f"Total configurations to run: {len(configs)}")
     print(f"Parallelism: {args.parallel}\n")

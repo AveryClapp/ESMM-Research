@@ -30,6 +30,8 @@
 #include "../src/kernels/esmm_ab_32x32.cu"
 #include "../src/kernels/esmm_ab_fused.cu"
 #include "../src/kernels/esmm_ab_simple_fused.cu"
+#include "../src/kernels/esmm_ab_8x32_db.cu"
+#include "../src/kernels/esmm_ab_fused_pipeline.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "../src/preprocessors/ab_preprocessor.cu"
 #include <chrono>
@@ -1676,5 +1678,197 @@ bool run_esmm_ab_simple_fused_no_check(int rows, int cols, int inners, float *d_
 
   cudaFree(d_a_patterns);
   cudaFree(d_b_patterns);
+  return true;
+}
+
+// ============================================================================
+// K26: ESMM A+B Sparse - 8×32 GRANULARITY, DOUBLE-BUFFERED
+// ============================================================================
+
+bool run_esmm_ab_8x32_db(int rows, int cols, int inners, float *d_A, float *d_B,
+                          float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  ABPatternMetadata meta = preprocess_ab_patterns_8x32<BK, 8, WN>(d_A, d_B, rows, cols, inners);
+
+  for (int i = 0; i < runs; i++) {
+    esmm_ab_8x32_db<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    free_ab_pattern_metadata(meta);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  free_ab_pattern_metadata(meta);
+  return passed;
+}
+
+bool run_esmm_ab_8x32_db_no_check(int rows, int cols, int inners, float *d_A,
+                                    float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start);
+
+  for (int i = 0; i < runs; i++) {
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+    ABPatternMetadata meta = preprocess_ab_patterns_8x32<BK, 8, WN>(d_A, d_B, rows, cols, inners);
+    esmm_ab_8x32_db<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    cudaDeviceSynchronize();
+    free_ab_pattern_metadata(meta);
+  }
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("Kernel time: %.3f ms (avg: %.3f ms)\n", milliseconds, milliseconds / runs);
+
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    return false;
+  }
+
+  return true;
+}
+
+// ============================================================================
+// K27: ESMM A+B Fused Pipeline (8×32 Granularity, No A Preprocess)
+// ============================================================================
+
+bool run_esmm_ab_fused_pipeline(int rows, int cols, int inners, float *d_A, float *d_B,
+                                 float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  // Cache B patterns once
+  uint8_t* cached_b = preprocess_b_patterns_cached<BK, WN>(d_B, inners, cols);
+  const int numKBlocks = inners / BK;
+
+  for (int i = 0; i < runs; i++) {
+    esmm_ab_fused_pipeline<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                cached_b, numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    cudaFree(cached_b);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  cudaFree(cached_b);
+  return passed;
+}
+
+bool run_esmm_ab_fused_pipeline_no_check(int rows, int cols, int inners, float *d_A,
+                                          float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+  // Cache B patterns ONCE outside timing loop (simulates inference)
+  uint8_t* cached_b = preprocess_b_patterns_cached<BK, WN>(d_B, inners, cols);
+  const int numKBlocks = inners / BK;
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start);
+
+  for (int i = 0; i < runs; i++) {
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+    esmm_ab_fused_pipeline<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                cached_b, numKBlocks);
+    cudaDeviceSynchronize();
+  }
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("Kernel time: %.3f ms (avg: %.3f ms)\n", milliseconds, milliseconds / runs);
+
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    cudaFree(cached_b);
+    return false;
+  }
+
+  cudaFree(cached_b);
   return true;
 }

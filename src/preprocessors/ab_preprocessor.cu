@@ -7,6 +7,7 @@
 struct ABPatternMetadata {
     uint8_t* d_a_patterns;  // [numMBlocks × numKBlocks]
     uint8_t* d_b_patterns;  // [numNBlocks × numKBlocks]
+    bool owns_b_patterns;   // Whether this struct owns d_b_patterns (should cudaFree)
     int numMBlocks;         // M / WM
     int numNBlocks;         // N / WN
     int numKBlocks;         // K / BK
@@ -17,7 +18,7 @@ struct ABPatternMetadata {
 
 inline void free_ab_pattern_metadata(ABPatternMetadata& meta) {
     if (meta.d_a_patterns) cudaFree(meta.d_a_patterns);
-    if (meta.d_b_patterns) cudaFree(meta.d_b_patterns);
+    if (meta.owns_b_patterns && meta.d_b_patterns) cudaFree(meta.d_b_patterns);
     meta.d_a_patterns = nullptr;
     meta.d_b_patterns = nullptr;
 }
@@ -189,6 +190,7 @@ ABPatternMetadata preprocess_ab_patterns(
     meta.numMBlocks = M / WM;
     meta.numNBlocks = N / WN;
     meta.numKBlocks = K / BK;
+    meta.owns_b_patterns = true;
 
     int a_total = meta.numMBlocks * meta.numKBlocks;
     int b_total = meta.numNBlocks * meta.numKBlocks;
@@ -284,6 +286,7 @@ ABPatternMetadata preprocess_ab_patterns_8x32(
     // B: patterns at WN-col granularity (same as before)
     meta.numNBlocks = N / WN;
     meta.numKBlocks = K / BK;
+    meta.owns_b_patterns = true;
 
     // Store numTileRows in numMBlocks for compatibility
     meta.numMBlocks = numTileRows;
@@ -385,6 +388,7 @@ ABPatternMetadata preprocess_ab_patterns_32x32(
     meta.numMBlocks = numTileRows;
     meta.numNBlocks = numWarpCols;
     meta.numKBlocks = numKBlocks;
+    meta.owns_b_patterns = true;
 
     cudaMalloc(&meta.d_a_patterns, numTileRows * numKBlocks * sizeof(uint8_t));
     cudaMalloc(&meta.d_b_patterns, numWarpCols * numKBlocks * sizeof(uint8_t));
@@ -444,4 +448,43 @@ ABPatternMetadata preprocess_ab_patterns_32x32(
     cudaEventDestroy(stop);
 
     return meta;
+}
+
+// ============================================================================
+// B-Pattern Caching (for K27 fused pipeline - B patterns computed once)
+// ============================================================================
+
+template <const int BK = 8, const int WN = 32>
+uint8_t* preprocess_b_patterns_cached(
+    const float* d_B,
+    int K, int N
+) {
+    constexpr int NUM_THREADS = 256;
+    const int numNBlocks = N / WN;
+    const int numKBlocks = K / BK;
+    const int b_total = numNBlocks * numKBlocks;
+
+    uint8_t* d_b_patterns;
+    cudaMalloc(&d_b_patterns, b_total * sizeof(uint8_t));
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
+    preprocess_b_patterns_kernel<BK, WN, NUM_THREADS>
+        <<<numNBlocks, NUM_THREADS>>>(K, N, d_B, d_b_patterns);
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float ms;
+    cudaEventElapsedTime(&ms, start, stop);
+    printf("B-Pattern Caching (WN=%d): %d patterns (%.1f KB), time: %.3f ms\n",
+           WN, b_total, b_total / 1024.0f, ms);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    return d_b_patterns;  // Caller owns and must cudaFree
 }

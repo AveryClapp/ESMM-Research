@@ -190,6 +190,20 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_simple_fused_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 26: // ESMM A+B 8x32 Double-Buffered (cp.async B)
+        if (check_results) {
+            res = run_esmm_ab_8x32_db(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_8x32_db_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 27: // ESMM A+B Fused Pipeline (8x32, No A Preprocess)
+        if (check_results) {
+            res = run_esmm_ab_fused_pipeline(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_fused_pipeline_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -323,10 +337,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Validate all kernel choices are in valid range (1-25)
+    // Validate all kernel choices are in valid range (1-27)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 25) {
-            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-25." << endl;
+        if (k < 1 || k > 27) {
+            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-27." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
         }
@@ -397,8 +411,8 @@ int main(int argc, char *argv[]) {
         float block_sparsity_percent_b = 100.0f - density_percent_b;
 
         for (int k : kernel_choices) {
-            if (k == 21) {
-                // K21: 8-row A granularity for symmetric 8×32 approach
+            if (k == 21 || k == 26 || k == 27) {
+                // K21/K26/K27: 8-row A granularity for symmetric 8×32 approach
                 randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent_a, random_seed);
             }
             else if (k == 22) {

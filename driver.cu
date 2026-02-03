@@ -204,6 +204,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_fused_pipeline_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 28: // ESMM A+B Fused Pipeline BRANCHLESS (No per-dotIdx branching)
+        if (check_results) {
+            res = run_esmm_ab_fused_pipeline_branchless(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_fused_pipeline_branchless_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -339,8 +346,8 @@ int main(int argc, char *argv[]) {
 
     // Validate all kernel choices are in valid range (1-27)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 27) {
-            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-27." << endl;
+        if (k < 1 || k > 28) {
+            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-28." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
         }
@@ -411,7 +418,7 @@ int main(int argc, char *argv[]) {
         float block_sparsity_percent_b = 100.0f - density_percent_b;
 
         for (int k : kernel_choices) {
-            if (k == 21 || k == 26 || k == 27) {
+            if (k == 21 || k == 26 || k == 27 || k == 28) {
                 // K21/K26/K27: 8-row A granularity for symmetric 8×32 approach
                 randomize_matrix_A<8, 8>(h_A, rows, inners, block_sparsity_percent_a, random_seed);
             }

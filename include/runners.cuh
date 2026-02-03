@@ -32,6 +32,7 @@
 #include "../src/kernels/esmm_ab_simple_fused.cu"
 #include "../src/kernels/esmm_ab_8x32_db.cu"
 #include "../src/kernels/esmm_ab_fused_pipeline.cu"
+#include "../src/kernels/esmm_ab_fused_pipeline_branchless.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "../src/preprocessors/ab_preprocessor.cu"
 #include <chrono>
@@ -1480,13 +1481,13 @@ bool run_esmm_ab_32x32_no_check(int rows, int cols, int inners, float *d_A,
 
 bool run_esmm_ab_fused(int rows, int cols, int inners, float *d_A, float *d_B,
                        float *d_C, float *h_C, float *h_C_ref, int runs) {
-  const uint NUM_THREADS = 256;  // 8 warps
+  const uint NUM_THREADS = 128;  // 8 warps
   const uint BN = 128;
   const uint BM = 64;
   const uint BK = 8;
   const uint WN = 32;   // 8×32 granularity
-  const uint WM = 32;   // WMITER=4 for 8-row sub-tiles
-  const uint WNITER = 1;
+  const uint WM = 64;   // WMITER=4 for 8-row sub-tiles
+  const uint WNITER = 2;
   const uint TN = 8;
   const uint TM = 1;
 
@@ -1847,6 +1848,102 @@ bool run_esmm_ab_fused_pipeline_no_check(int rows, int cols, int inners, float *
   for (int i = 0; i < runs; i++) {
     cudaMemset(d_C, 0, rows * cols * sizeof(float));
     esmm_ab_fused_pipeline<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                cached_b, numKBlocks);
+    cudaDeviceSynchronize();
+  }
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("Kernel time: %.3f ms (avg: %.3f ms)\n", milliseconds, milliseconds / runs);
+
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    cudaFree(cached_b);
+    return false;
+  }
+
+  cudaFree(cached_b);
+  return true;
+}
+
+// K28: ESMM A+B Fused Pipeline BRANCHLESS (No per-dotIdx branching)
+// ============================================================================
+
+bool run_esmm_ab_fused_pipeline_branchless(int rows, int cols, int inners, float *d_A, float *d_B,
+                                 float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+
+  uint8_t* cached_b = preprocess_b_patterns_cached<BK, WN>(d_B, inners, cols);
+  const int numKBlocks = inners / BK;
+
+  for (int i = 0; i < runs; i++) {
+    esmm_ab_fused_pipeline_branchless<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                cached_b, numKBlocks);
+  }
+
+  cudaDeviceSynchronize();
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    cudaFree(cached_b);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+
+  cudaFree(cached_b);
+  return passed;
+}
+
+bool run_esmm_ab_fused_pipeline_branchless_no_check(int rows, int cols, int inners, float *d_A,
+                                          float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 256;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;
+  const uint WNITER = 1;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+  uint8_t* cached_b = preprocess_b_patterns_cached<BK, WN>(d_B, inners, cols);
+  const int numKBlocks = inners / BK;
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start);
+
+  for (int i = 0; i < runs; i++) {
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+    esmm_ab_fused_pipeline_branchless<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
         <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
                                 cached_b, numKBlocks);
     cudaDeviceSynchronize();

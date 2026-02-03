@@ -15,7 +15,7 @@ using std::endl;
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 27; i++) {
+    for (int i = 1; i <= 28; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -24,7 +24,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 27; i++) {
+    for (int i = start; i <= end && i <= 28; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -33,7 +33,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 27) {
+    if (kernel >= 1 && kernel <= 28) {
       kernels.push_back(kernel);
     }
   }
@@ -70,6 +70,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 25: return "ESMM A+B Simple Fused (Preprocessing + K20)";
     case 26: return "ESMM A+B 8x32 Double-Buffered";
     case 27: return "ESMM A+B Fused Pipeline (8x32, No A Preprocess)";
+    case 28: return "ESMM A+B Fused Pipeline BRANCHLESS (No per-dotIdx branch)";
     default: return "Unknown Kernel";
   }
 }
@@ -77,7 +78,7 @@ const char* get_kernel_name(int kernel_choice) {
 void print_usage(const char* program_name) {
   cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
   cout << "\nKernel_choice: " << endl;
-  cout << "    Single kernel: 1-27 (run specific kernel)" << endl;
+  cout << "    Single kernel: 1-28 (run specific kernel)" << endl;
   cout << "    Multiple kernels: \"1,3,5\" (comma-separated, no spaces)" << endl;
   cout << "    Range: \"1-5\" (run kernels 1 through 5)" << endl;
   cout << "    All: \"all\" (run all kernels 1-25)" << endl;

@@ -100,25 +100,29 @@ __global__ void preprocess_b_inline(
 
         #pragma unroll
         for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
-            const int flatIdx = laneId * ELEMENTS_PER_THREAD + i;
-            const int kRow = flatIdx / WN;
-            const int nCol = flatIdx % WN;
+            const int baseFlatIdx = (i * 4 * WARP_SIZE) + (laneId * 4);
 
-            const int globalK = globalKBase + kRow;
-            const int globalN = globalNBase + nCol;
+            const int kRowBase = baseFlatIdx / WN;
+            const int nColBase = baseFlatIdx % WN;
 
-            if (globalK < K && globalN < N) {
-                float val = B[globalK * N + globalN];
-                if (val != 0.0f) {
+            const float4* ptrB = reinterpret_cast<const float4*>(&B[globalKBase * N + globalNBase]);
+            float4 vals = ptrB[baseFlatIdx / 4];
+
+            auto process = [&](float v, int offset) {
+                if (v != 0.0f) {
+                    int currentFlatIdx = baseFlatIdx + offset;
+                    int kRow = currentFlatIdx / WN;
                     threadPattern |= (1 << kRow);
                 }
-            }
+            };
+
+            process(vals.x, 0);
+            process(vals.y, 1);
+            process(vals.z, 2);
+            process(vals.w, 3);
         }
 
-        #pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            threadPattern |= __shfl_xor_sync(0xFFFFFFFF, threadPattern, offset);
-        }
+        threadPattern = __reduce_or_sync(0xFFFFFFFF, threadPattern);
 
         if (laneId == 0) {
             patterns[nBlock * numKBlocks + kBlock] = threadPattern;
@@ -248,7 +252,7 @@ esmm_ab_compute_inline(
                 continue;
             }
 
-            #pragma unroll
+            #pragma unroll WMITER
             for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
                 regM[wSubRowIdx * TM + 0] = As[(dotIdx * (BM + 1)) + warpRow * WM +
                     wSubRowIdx * WSUBM + threadRowInWarp * TM + 0];
@@ -256,24 +260,30 @@ esmm_ab_compute_inline(
 
             #pragma unroll
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
-                regN[wSubColIdx * TN + 0] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 0];
-                regN[wSubColIdx * TN + 1] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 1];
-                regN[wSubColIdx * TN + 2] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 2];
-                regN[wSubColIdx * TN + 3] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 3];
-                regN[wSubColIdx * TN + 4] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 4];
-                regN[wSubColIdx * TN + 5] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 5];
-                regN[wSubColIdx * TN + 6] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 6];
-                regN[wSubColIdx * TN + 7] = Bs[(dotIdx * BN) + warpCol * WN + wSubColIdx * WSUBN + threadColInWarp * TN + 7];
+                const float4 tmp0 = reinterpret_cast<const float4*>(&Bs[(dotIdx * BN) + warpCol * WN + 
+                                        wSubColIdx * WSUBN + threadColInWarp * TN])[0];
+                const float4 tmp1 = reinterpret_cast<const float4*>(&Bs[(dotIdx * BN) + warpCol * WN + 
+                                        wSubColIdx * WSUBN + threadColInWarp * TN + 4])[0];
+                regN[wSubColIdx * TN + 0] = tmp0.x;
+                regN[wSubColIdx * TN + 1] = tmp0.y;
+                regN[wSubColIdx * TN + 2] = tmp0.z;
+                regN[wSubColIdx * TN + 3] = tmp0.w;
+                regN[wSubColIdx * TN + 4] = tmp1.x;
+                regN[wSubColIdx * TN + 5] = tmp1.y;
+                regN[wSubColIdx * TN + 6] = tmp1.z;
+                regN[wSubColIdx * TN + 7] = tmp1.w;
             }
 
             #pragma unroll
             for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
+                const float valM = regM[wSubRowIdx];
                 #pragma unroll
                 for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
+                    const uint resBase = wSubRowIdx * (WNITER * TN) + (wSubColIdx * TN);
+                    const uint nBase = wSubColIdx * TN;
                     #pragma unroll
                     for (uint resIdxN = 0; resIdxN < TN; ++resIdxN) {
-                        threadResults[(wSubRowIdx * TM + 0) * (WNITER * TN) + wSubColIdx * TN + resIdxN] +=
-                            regM[wSubRowIdx * TM + 0] * regN[wSubColIdx * TN + resIdxN];
+                        threadResults[resBase + resIdxN] += valM * regN[nBase + resIdxN];
                     }
                 }
             }

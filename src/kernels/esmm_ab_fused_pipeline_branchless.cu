@@ -1,12 +1,9 @@
 #pragma once
 
-// K27: Fused Pipeline - A-mask computed on-the-fly from shared memory
-// Based on K26 (double-buffered) with:
-//   - NO separate A preprocessing pass (saves ~264us at 4096x4096)
-//   - A-mask extracted from As[cur] shared memory each K-iteration
-//   - Cached B patterns (computed once, reused across batches)
-//   - Double-buffered As/Bs, cp.async for B loads
-//   - Eliminates ~32KB joint_smem (total smem ~12KB vs ~44KB in K26)
+// K28: Branchless variant of K27 - removes per-dotIdx branching in FMA loop.
+// Tests hypothesis: at moderate sparsity (50%), branch overhead from per-K-row
+// checks may cost more than just multiplying through zeros.
+// Keeps coarse WMITER-level skip (joint==0) since that's warp-uniform.
 
 #include <cuda_runtime.h>
 #include <cuda_pipeline.h>
@@ -20,42 +17,13 @@
 #define CEIL_DIV(a, b) (((a) + (b) - 1) / (b))
 #endif
 
-// Compute 8-bit A-mask from an 8×8 sub-tile in transposed shared memory.
-// Each warp (32 lanes) covers 64 elements (8 rows × 8 cols), 2 per lane.
-// Returns pattern where bit k is set if row k has any non-zero in the 8×8 tile.
-__device__ __forceinline__ uint8_t compute_a_mask_from_smem(
-    const float* As_buf, int mBase, int BM_PLUS_1)
-{
-    const int laneId = threadIdx.x % WARPSIZE;
-    uint8_t threadPattern = 0;
-
-    #pragma unroll
-    for (int i = 0; i < 2; i++) {
-        const int flatIdx = laneId * 2 + i;
-        const int mRow = flatIdx / 8;   // 0-7
-        const int kCol = flatIdx % 8;   // 0-7
-
-        // As is stored transposed: As[kCol * (BM+1) + mRow]
-        float val = As_buf[kCol * BM_PLUS_1 + mBase + mRow];
-        if (val != 0.0f) {
-            threadPattern |= (1 << kCol);
-        }
-    }
-
-    // Warp OR-reduce: 5 rounds for 32 lanes
-    #pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        threadPattern |= __shfl_xor_sync(0xFFFFFFFF, threadPattern, offset);
-    }
-
-    return threadPattern;
-}
+// compute_a_mask_from_smem is defined in esmm_ab_fused_pipeline.cu (K27)
 
 template <const int BM, const int BN, const int BK,
           const int WM, const int WN, const int WNITER,
           const int TM, const int TN, const int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS)
-esmm_ab_fused_pipeline(
+esmm_ab_fused_pipeline_branchless(
     int M, int N, int K,
     const float* __restrict__ A,
     const float* __restrict__ B,
@@ -81,7 +49,7 @@ esmm_ab_fused_pipeline(
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
     // Double-buffered shared memory (NO joint_smem needed!)
-    __shared__ float As[2][BK * (BM + 4)];  // Padded to avoid bank conflicts
+    __shared__ float As[2][BK * (BM + 1)];  // Padded to avoid bank conflicts
     __shared__ float Bs[2][BK * BN];
 
     // Global warp column for B-pattern lookup
@@ -115,10 +83,10 @@ esmm_ab_fused_pipeline(
             if (innerRowA + offset < BM) {
                 float4 tmp = reinterpret_cast<const float4*>(
                     &A[(innerRowA + offset) * K + innerColA * 4])[0];
-                As[0][(innerColA * 4 + 0) * (BM + 4) + innerRowA + offset] = tmp.x;
-                As[0][(innerColA * 4 + 1) * (BM + 4) + innerRowA + offset] = tmp.y;
-                As[0][(innerColA * 4 + 2) * (BM + 4) + innerRowA + offset] = tmp.z;
-                As[0][(innerColA * 4 + 3) * (BM + 4) + innerRowA + offset] = tmp.w;
+                As[0][(innerColA * 4 + 0) * (BM + 1) + innerRowA + offset] = tmp.x;
+                As[0][(innerColA * 4 + 1) * (BM + 1) + innerRowA + offset] = tmp.y;
+                As[0][(innerColA * 4 + 2) * (BM + 1) + innerRowA + offset] = tmp.z;
+                As[0][(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
             }
         }
 
@@ -152,10 +120,10 @@ esmm_ab_fused_pipeline(
             if (innerRowA + offset < BM) {
                 float4 tmp = reinterpret_cast<const float4*>(
                     &A_next[(innerRowA + offset) * K + innerColA * 4])[0];
-                As[next][(innerColA * 4 + 0) * (BM + 4) + innerRowA + offset] = tmp.x;
-                As[next][(innerColA * 4 + 1) * (BM + 4) + innerRowA + offset] = tmp.y;
-                As[next][(innerColA * 4 + 2) * (BM + 4) + innerRowA + offset] = tmp.z;
-                As[next][(innerColA * 4 + 3) * (BM + 4) + innerRowA + offset] = tmp.w;
+                As[next][(innerColA * 4 + 0) * (BM + 1) + innerRowA + offset] = tmp.x;
+                As[next][(innerColA * 4 + 1) * (BM + 1) + innerRowA + offset] = tmp.y;
+                As[next][(innerColA * 4 + 2) * (BM + 1) + innerRowA + offset] = tmp.z;
+                As[next][(innerColA * 4 + 3) * (BM + 1) + innerRowA + offset] = tmp.w;
             }
         }
 
@@ -191,12 +159,12 @@ esmm_ab_fused_pipeline(
             for (int m = 0; m < WMITER; ++m) {
                 const int mBase = warpRow * WM + m * WSUBM;
                 uint8_t a_mask = compute_a_mask_from_smem(
-                    As[cur], mBase, BM + 4);
+                    As[cur], mBase, BM + 1);
                 joints[m] = a_mask & b_mask;
             }
         }
 
-        // ---- Compute CURRENT tile from buf[cur] ----
+        // ---- Compute CURRENT tile from buf[cur] - NO per-dotIdx branch ----
         #pragma unroll
         for (uint wSubRowIdx = 0; wSubRowIdx < WMITER; ++wSubRowIdx) {
             const uint8_t joint = joints[wSubRowIdx];
@@ -207,11 +175,7 @@ esmm_ab_fused_pipeline(
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
                 #pragma unroll
                 for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
-                    if (!(joint & (1 << dotIdx))) {
-                        continue;
-                    }
-
-                    float a_val = As[cur][(dotIdx * (BM + 4)) + warpRow * WM +
+                    float a_val = As[cur][(dotIdx * (BM + 1)) + warpRow * WM +
                                      wSubRowIdx * WSUBM + threadRowInWarp * TM + 0];
 
                     #pragma unroll
@@ -256,7 +220,7 @@ esmm_ab_fused_pipeline(
             for (int m = 0; m < WMITER; ++m) {
                 const int mBase = warpRow * WM + m * WSUBM;
                 uint8_t a_mask = compute_a_mask_from_smem(
-                    As[lastBuf], mBase, BM + 4);
+                    As[lastBuf], mBase, BM + 1);
                 joints[m] = a_mask & b_mask;
             }
         }
@@ -271,11 +235,7 @@ esmm_ab_fused_pipeline(
             for (uint wSubColIdx = 0; wSubColIdx < WNITER; ++wSubColIdx) {
                 #pragma unroll
                 for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
-                    if (!(joint & (1 << dotIdx))) {
-                        continue;
-                    }
-
-                    float a_val = As[lastBuf][(dotIdx * (BM + 4)) + warpRow * WM +
+                    float a_val = As[lastBuf][(dotIdx * (BM + 1)) + warpRow * WM +
                                      wSubRowIdx * WSUBM + threadRowInWarp * TM + 0];
 
                     #pragma unroll

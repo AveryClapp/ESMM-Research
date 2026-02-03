@@ -14,7 +14,8 @@
 #define CEIL_DIV(a, b) (((a) + (b) - 1) / (b))
 #endif
 
-// Copy-pasted from ab_preprocessor.cu
+// Coalesced A preprocessor - all threads read same row, consecutive K-columns
+// Processes 32 K-columns per iteration (4 BK-blocks), uses ballot for reduction
 template <const int BK, const int TILE_M, const int NUM_THREADS>
 __global__ void preprocess_a_inline(
     int M, int K,
@@ -23,9 +24,12 @@ __global__ void preprocess_a_inline(
 ) {
     constexpr int WARP_SIZE = 32;
     constexpr int WARPS_PER_BLOCK = NUM_THREADS / WARP_SIZE;
+    constexpr int K_CHUNK = WARP_SIZE;
+    constexpr int BK_BLOCKS_PER_CHUNK = K_CHUNK / BK;
 
     const int numTiles = M / TILE_M;
     const int numKBlocks = K / BK;
+    const int numKChunks = K / K_CHUNK;
 
     const int warpId = threadIdx.x / WARP_SIZE;
     const int laneId = threadIdx.x % WARP_SIZE;
@@ -35,42 +39,38 @@ __global__ void preprocess_a_inline(
 
     const int globalMBase = tileIdx * TILE_M;
 
-    for (int kBlock = warpId; kBlock < numKBlocks; kBlock += WARPS_PER_BLOCK) {
-        const int globalKBase = kBlock * BK;
+    for (int kChunk = warpId; kChunk < numKChunks; kChunk += WARPS_PER_BLOCK) {
+        const int globalKChunkBase = kChunk * K_CHUNK;
 
-        uint8_t threadPattern = 0;
+        uint32_t myBit = 0;
 
-        constexpr int ELEMENTS_PER_THREAD = (TILE_M * BK) / WARP_SIZE;
-
-        #pragma unroll
-        for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
-            const int flatIdx = laneId * ELEMENTS_PER_THREAD + i;
-            const int mRow = flatIdx / BK;
-            const int kCol = flatIdx % BK;
-
+        #pragma unroll 4
+        for (int mRow = 0; mRow < TILE_M; mRow++) {
             const int globalM = globalMBase + mRow;
-            const int globalK = globalKBase + kCol;
 
-            if (globalM < M && globalK < K) {
-                float val = A[globalM * K + globalK];
-                if (val != 0.0f) {
-                    threadPattern |= (1 << kCol);
-                }
+            float val = A[globalM * K + globalKChunkBase + laneId];
+
+            if (val != 0.0f) {
+                myBit = 1;
             }
         }
 
-        #pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            threadPattern |= __shfl_xor_sync(0xFFFFFFFF, threadPattern, offset);
-        }
+        uint32_t ballot = __ballot_sync(0xFFFFFFFF, myBit);
 
-        if (laneId == 0) {
-            patterns[tileIdx * numKBlocks + kBlock] = threadPattern;
+        #pragma unroll
+        for (int bkOffset = 0; bkOffset < BK_BLOCKS_PER_CHUNK; bkOffset++) {
+            const int kBlock = kChunk * BK_BLOCKS_PER_CHUNK + bkOffset;
+            uint8_t pattern = (ballot >> (bkOffset * BK)) & 0xFF;
+
+            if (laneId == bkOffset) {
+                patterns[tileIdx * numKBlocks + kBlock] = pattern;
+            }
         }
     }
 }
 
-// Copy-pasted from ab_preprocessor.cu
+// Optimized B preprocessor using float4 loads
+// B is K×N row-major, so consecutive N-values are consecutive in memory
 template <const int BK, const int WN, const int NUM_THREADS>
 __global__ void preprocess_b_inline(
     int K, int N,
@@ -79,6 +79,9 @@ __global__ void preprocess_b_inline(
 ) {
     constexpr int WARP_SIZE = 32;
     constexpr int WARPS_PER_BLOCK = NUM_THREADS / WARP_SIZE;
+    constexpr int FLOAT4_PER_ROW = WN / 4;
+    constexpr int TOTAL_FLOAT4 = BK * FLOAT4_PER_ROW; 
+    constexpr int FLOAT4_PER_THREAD = TOTAL_FLOAT4 / WARP_SIZE;
 
     const int numNBlocks = N / WN;
     const int numKBlocks = K / BK;
@@ -96,30 +99,19 @@ __global__ void preprocess_b_inline(
 
         uint8_t threadPattern = 0;
 
-        constexpr int ELEMENTS_PER_THREAD = (BK * WN) / WARP_SIZE;
-
         #pragma unroll
-        for (int i = 0; i < ELEMENTS_PER_THREAD; i++) {
-            const int baseFlatIdx = (i * 4 * WARP_SIZE) + (laneId * 4);
+        for (int i = 0; i < FLOAT4_PER_THREAD; i++) {
+            const int float4Idx = laneId + i * WARP_SIZE;
+            const int kRow = float4Idx / FLOAT4_PER_ROW;
+            const int nBase = (float4Idx % FLOAT4_PER_ROW) * 4;
 
-            const int kRowBase = baseFlatIdx / WN;
-            const int nColBase = baseFlatIdx % WN;
+            const int globalK = globalKBase + kRow;
+            const int globalN = globalNBase + nBase;
 
-            const float4* ptrB = reinterpret_cast<const float4*>(&B[globalKBase * N + globalNBase]);
-            float4 vals = ptrB[baseFlatIdx / 4];
-
-            auto process = [&](float v, int offset) {
-                if (v != 0.0f) {
-                    int currentFlatIdx = baseFlatIdx + offset;
-                    int kRow = currentFlatIdx / WN;
-                    threadPattern |= (1 << kRow);
-                }
-            };
-
-            process(vals.x, 0);
-            process(vals.y, 1);
-            process(vals.z, 2);
-            process(vals.w, 3);
+            float4 vals = *reinterpret_cast<const float4*>(&B[globalK * N + globalN]);
+            if (vals.x != 0.0f || vals.y != 0.0f || vals.z != 0.0f || vals.w != 0.0f) {
+                threadPattern |= (1 << kRow);
+            }
         }
 
         threadPattern = __reduce_or_sync(0xFFFFFFFF, threadPattern);
@@ -247,7 +239,6 @@ esmm_ab_compute_inline(
 
         #pragma unroll
         for (int dotIdx = 0; dotIdx < BK; ++dotIdx) {
-            // Every thread executes this together
             if (!(joint & (1 << dotIdx))) {
                 continue;
             }

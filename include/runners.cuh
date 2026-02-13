@@ -35,6 +35,7 @@
 #include "../src/kernels/esmm_ab_fused_pipeline_branchless.cu"
 #include "../src/kernels/esmm_ab_16x8.cu"
 #include "../src/kernels/esmm_ab_8x8.cu"
+#include "../src/kernels/esmm_ab_opt.cu"
 #include "../src/preprocessors/a_preprocessor_hybrid.cu"
 #include "../src/preprocessors/ab_preprocessor.cu"
 #include <chrono>
@@ -2204,6 +2205,127 @@ bool run_esmm_ab_8x8_no_check(int rows, int cols, int inners, float *d_A,
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess) {
     printf("CUDA error: %s\n", cudaGetErrorString(err));
+    cudaFree(d_a_patterns);
+    cudaFree(d_b_patterns);
+    return false;
+  }
+
+  cudaFree(d_a_patterns);
+  cudaFree(d_b_patterns);
+  return true;
+}
+
+// K30
+bool run_esmm_ab_opt(int rows, int cols, int inners, float *d_A, float *d_B,
+                               float *d_C, float *h_C, float *h_C_ref, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  uint8_t* d_a_patterns = nullptr;
+  uint8_t* d_b_patterns = nullptr;
+
+  constexpr int NUM_WARPS_M = BM / WM;
+  constexpr int NUM_WARPS_N = BN / WN;
+
+  const int numKBlocks = inners / BK;
+  const int numATiles = rows / WM;
+  const int numBTiles = cols / WN;
+
+  
+  cudaMalloc(&d_a_patterns, numATiles * numKBlocks * sizeof(uint8_t));
+  cudaMalloc(&d_b_patterns, numBTiles * numKBlocks * sizeof(uint8_t));
+
+  dim3 gridDim(CEIL_DIV(rows, BN), CEIL_DIV(cols, BM));
+  dim3 blockDim(NUM_THREADS);
+
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+  for (int r = 0; r < runs; r++) {
+    dim3 gridA(numATiles);
+    preprocess_a_opt<BK, WM, NUM_THREADS><<<gridA, NUM_THREADS>>>(
+        rows, inners, d_A, d_a_patterns
+        );
+    dim3 gridB(numBTiles);
+    preprocess_b_opt<BK, WN, NUM_THREADS><<<gridB, NUM_THREADS>>>(
+        inners, cols, d_B, d_b_patterns
+        );
+    cudaDeviceSynchronize();
+    esmm_ab_compute_opt<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS>
+      <<<gridDim, blockDim>>>(
+          rows, cols, inners, d_A, d_B, d_C,
+          d_a_patterns, d_b_patterns, numKBlocks
+          );
+  }
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    cudaFree(d_a_patterns);
+    cudaFree(d_b_patterns);
+    return false;
+  }
+
+  cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+  bool passed = verifyResults(h_C, h_C_ref, rows * cols);
+  cudaFree(d_a_patterns);
+  cudaFree(d_b_patterns);
+  return passed;
+}
+
+bool run_esmm_ab_opt_no_check(int rows, int cols, int inners, float *d_A,
+    float *d_B, float *d_C, int runs) {
+  const uint NUM_THREADS = 128;
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 64;
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  uint8_t* d_a_patterns = nullptr;
+  uint8_t* d_b_patterns = nullptr;
+  constexpr int NUM_WARPS_M = BM / WM;
+  constexpr int NUM_WARPS_N = BN / WN;
+
+  const int numKBlocks = inners / BK;
+  const int numATiles = rows / WM;
+  const int numBTiles = cols / WN;
+
+  cudaMalloc(&d_a_patterns, numATiles * numKBlocks * sizeof(uint8_t));
+  cudaMalloc(&d_b_patterns, numBTiles * numKBlocks * sizeof(uint8_t));
+
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+  dim3 blockDim(NUM_THREADS);
+
+  cudaMemset(d_C, 0, rows * cols * sizeof(float));
+  for (int r = 0; r < runs; r++) {
+    dim3 gridA(numATiles);
+    preprocess_a_opt<BK, WM, NUM_THREADS><<<gridA, NUM_THREADS>>>(
+        rows, inners, d_A, d_a_patterns
+        );
+    dim3 gridB(numBTiles);
+    preprocess_b_opt<BK, WN, NUM_THREADS><<<gridB, NUM_THREADS>>>(
+        inners, cols, d_B, d_b_patterns
+        );
+    cudaDeviceSynchronize();
+    esmm_ab_compute_opt<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS>
+      <<<gridDim, blockDim>>>(
+          rows, cols, inners, d_A, d_B, d_C,
+          d_a_patterns, d_b_patterns, numKBlocks
+          );
+  }
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
     cudaFree(d_a_patterns);
     cudaFree(d_b_patterns);
     return false;

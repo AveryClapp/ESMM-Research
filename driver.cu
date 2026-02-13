@@ -225,6 +225,14 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_8x8_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
+    case 31: // ESMM A+B 8×8 Granularity (SpInfer-style finest A-pattern)
+        if (check_results) {
+            res = run_esmm_ab_opt(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_opt_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;
@@ -360,8 +368,8 @@ int main(int argc, char *argv[]) {
 
     // Validate all kernel choices are in valid range (1-27)
     for (int k : kernel_choices) {
-        if (k < 1 || k > 30) {
-            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-30." << endl;
+        if (k < 1 || k > 31) {
+            cout << "Error: Kernel " << k << " is out of range. Valid kernels are 1-31." << endl;
             cout << "Run '" << argv[0] << " --help' to see available kernels." << endl;
             return 1;
         }

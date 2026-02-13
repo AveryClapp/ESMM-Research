@@ -15,7 +15,7 @@ using std::endl;
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
   if (input == "all") {
-    for (int i = 1; i <= 30; i++) {
+    for (int i = 1; i <= 31; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -24,7 +24,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   if (dash_pos != std::string::npos) {
     int start = std::stoi(input.substr(0, dash_pos));
     int end = std::stoi(input.substr(dash_pos + 1));
-    for (int i = start; i <= end && i <= 30; i++) {
+    for (int i = start; i <= end && i <= 31; i++) {
       kernels.push_back(i);
     }
     return kernels;
@@ -33,7 +33,7 @@ std::vector<int> parse_kernel_selection(const std::string& input) {
   std::string kernel_str;
   while (std::getline(ss, kernel_str, ',')) {
     int kernel = std::stoi(kernel_str);
-    if (kernel >= 1 && kernel <= 30) {
+    if (kernel >= 1 && kernel <= 31) {
       kernels.push_back(kernel);
     }
   }
@@ -73,6 +73,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 28: return "ESMM A+B Fused Pipeline BRANCHLESS (No per-dotIdx branch)";
     case 29: return "ESMM A+B 16x8 Granularity (16-row A-pattern)";
     case 30: return "ESMM A+B 8x8 Granularity (SpInfer-style 8-row A-pattern)";
+    case 31: return "ESMM A+B 8x32 Fused Optimized (Lazy pattern loading, etc)";
     default: return "Unknown Kernel";
   }
 }

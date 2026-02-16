@@ -35,33 +35,37 @@ fi
 
 # Check Python dependencies
 echo "Checking Python dependencies..."
-python3 -c "import pandas, matplotlib, numpy" 2>/dev/null
-if [ $? -ne 0 ]; then
+if python3 -c "import pandas, matplotlib, numpy" 2>/dev/null; then
+    echo "✓ Python dependencies OK"
+else
     echo "WARNING: Missing Python dependencies. Installing..."
     pip install pandas matplotlib numpy || {
         echo "ERROR: Failed to install dependencies. Please run manually:"
         echo "  pip install pandas matplotlib numpy"
         exit 1
     }
+    echo "✓ Python dependencies installed"
 fi
-echo "✓ Python dependencies OK"
 
 # Check for NCU (needed for benchmark.py)
 echo "Checking for NCU (NVIDIA Nsight Compute)..."
-if ! command -v ncu &> /dev/null; then
-    echo "WARNING: 'ncu' not found in PATH"
-    echo "Benchmarking requires NCU. Checking common locations..."
+NCU_FOUND=false
 
-    if [ -f "/usr/local/cuda/bin/ncu" ]; then
-        echo "✓ Found at /usr/local/cuda/bin/ncu"
-    elif [ -f "/usr/local/cuda-12.1/bin/ncu" ]; then
-        echo "✓ Found at /usr/local/cuda-12.1/bin/ncu"
-    else
-        echo "ERROR: NCU not found. Please install CUDA toolkit or add NCU to PATH"
-        exit 1
-    fi
-else
-    echo "✓ NCU found: $(which ncu)"
+if command -v ncu &> /dev/null; then
+    echo "✓ NCU found in PATH: $(which ncu)"
+    NCU_FOUND=true
+elif [ -f "/usr/local/cuda-12.1/bin/ncu" ]; then
+    echo "✓ NCU found at /usr/local/cuda-12.1/bin/ncu"
+    NCU_FOUND=true
+elif [ -f "/usr/local/cuda/bin/ncu" ]; then
+    echo "✓ NCU found at /usr/local/cuda/bin/ncu"
+    NCU_FOUND=true
+fi
+
+if [ "$NCU_FOUND" = false ]; then
+    echo "ERROR: NCU not found. Please install CUDA toolkit with Nsight Compute"
+    echo "Expected locations: /usr/local/cuda-12.1/bin/ncu or /usr/local/cuda/bin/ncu"
+    exit 1
 fi
 
 # Make all experiment scripts executable

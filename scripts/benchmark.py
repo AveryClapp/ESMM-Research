@@ -349,7 +349,14 @@ def run_ncu_profile(config):
         print(f"[Running] Kernel {kernel}, Size {size}, Sparsity {sparsity_label} ({mode})")
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        # Set up environment with LD_LIBRARY_PATH for NCU
+        env = os.environ.copy()
+        if 'LD_LIBRARY_PATH' in env:
+            env['LD_LIBRARY_PATH'] = f"/usr/local/lib64:{env['LD_LIBRARY_PATH']}"
+        else:
+            env['LD_LIBRARY_PATH'] = "/usr/local/lib64"
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
 
         # Clear caches if cold-start mode enabled
         if args.cold_start:
@@ -402,7 +409,14 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
             "details",
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        # Set up environment with LD_LIBRARY_PATH for NCU
+        env = os.environ.copy()
+        if 'LD_LIBRARY_PATH' in env:
+            env['LD_LIBRARY_PATH'] = f"/usr/local/lib64:{env['LD_LIBRARY_PATH']}"
+        else:
+            env['LD_LIBRARY_PATH'] = "/usr/local/lib64"
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
 
         # Each row: "ID","PID","Process","Host","Kernel","Context","Stream","Block Size","Grid Size","Device","CC","Section","Metric Name","Metric Unit","Metric Value",...
         lines = result.stdout.strip().split("\n")

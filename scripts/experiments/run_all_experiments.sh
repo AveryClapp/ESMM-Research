@@ -18,11 +18,16 @@ echo "Expected runtime: ~2 hours (depends on GPU, cold-start enabled)"
 echo "Output: results/figures/*.pdf"
 echo ""
 
-read -p "Continue? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Aborted."
-    exit 0
+# Auto-continue in non-interactive mode
+if [ -t 0 ]; then
+    read -p "Continue? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+else
+    echo "Running in non-interactive mode, auto-continuing..."
 fi
 
 cd "$PROJECT_ROOT"

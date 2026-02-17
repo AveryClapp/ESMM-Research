@@ -45,7 +45,7 @@ else
   echo "For now, using K10 (dense GEMM) as reference..."
 
   python3 scripts/benchmark.py \
-    --kernel 10 \
+    --kernel 15 \
     --sizes $SIZE \
     --sparsity "11111111" \
     --cold-start \

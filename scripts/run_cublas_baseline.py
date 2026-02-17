@@ -21,27 +21,26 @@ def run_cublas_baseline(sizes, output_file):
     For now, we use K10 (dense ESMM) as a proxy for cuBLAS performance.
     """
 
-    print("WARNING: Using K10 (dense ESMM) as cuBLAS proxy")
-    print("For accurate cuBLAS comparison, implement direct cublasSgemm call")
+    print("Running cuBLAS baseline (Kernel 15)")
 
-    # Use benchmark.py with K10 kernel (dense baseline)
+    # Use benchmark.py with K15 kernel (actual cuBLAS)
     project_root = Path(__file__).parent.parent
     benchmark_script = project_root / "scripts" / "benchmark.py"
 
     results = []
 
     for size in sizes:
-        print(f"\nRunning K10 at size {size}...")
+        print(f"\nRunning cuBLAS (K15) at size {size}...")
 
         # Run benchmark
         cmd = [
             "python3", str(benchmark_script),
-            "--kernel", "10",
+            "--kernel", "15",
             "--sizes", str(size),
             "--sparsity", "11111111",  # Dense
             "--cold-start",
             "--parallel", "1",
-            "--output-dir", "/tmp/cublas_baseline"
+            "-o", "/tmp/cublas_baseline"
         ]
 
         subprocess.run(cmd, check=True)

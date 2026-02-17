@@ -39,7 +39,7 @@ else
   echo "WARNING: cuBLAS baseline script not found. Using K10 (dense GEMM) as reference..."
 
   python3 scripts/benchmark.py \
-    --kernel 10 \
+    --kernel 15 \
     --sizes "$SIZES" \
     --sparsity "11111111" \
     --cold-start \

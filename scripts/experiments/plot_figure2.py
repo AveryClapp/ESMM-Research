@@ -28,7 +28,7 @@ def load_data():
         print("Please run: bash scripts/experiments/02_collect_figure2_data.sh")
         sys.exit(1)
 
-    df = pd.read_csv(summary_file)
+    df = pd.read_csv(summary_file, comment='#')
 
     # Separate preprocessing and main kernel
     preprocess_df = df[df['kernel'] == 'PREPROCESS'].copy()

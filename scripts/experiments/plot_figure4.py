@@ -36,7 +36,7 @@ def extract_times():
         print("  bash scripts/experiments/04_collect_figure4_data.sh")
         sys.exit(1)
 
-    df = pd.read_csv(summary_file)
+    df = pd.read_csv(summary_file, comment='#')
 
     # Filter for size 4096
     df_4096 = df[df['size'] == 4096]

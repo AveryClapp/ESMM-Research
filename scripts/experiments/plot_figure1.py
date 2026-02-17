@@ -50,7 +50,7 @@ def load_esmm_data():
         print("Please run: bash scripts/experiments/01_collect_figure1_data.sh")
         sys.exit(1)
 
-    df = pd.read_csv(summary_file)
+    df = pd.read_csv(summary_file, comment='#')
 
     # Filter out preprocessing kernels
     df = df[df['kernel'] != 'PREPROCESS'].copy()
@@ -72,14 +72,14 @@ def load_cublas_data():
     cublas_file = DATA_DIR / "cublas_baseline.csv"
 
     if cublas_file.exists():
-        df = pd.read_csv(cublas_file)
+        df = pd.read_csv(cublas_file, comment='#')
         # Assume format: size, time_us
         time_us = df[df['size'] == 4096]['time_us'].mean()
     else:
         # Fallback: use K10 dense reference
         summary_file = DATA_DIR / "cublas_reference" / "summary.csv"
         if summary_file.exists():
-            df = pd.read_csv(summary_file)
+            df = pd.read_csv(summary_file, comment='#')
             df = df[df['kernel'] != 'PREPROCESS']
             time_us = df['kernel_time_us'].mean()
         else:
@@ -96,7 +96,7 @@ def load_cusparse_data():
         print("WARNING: cuSPARSE baseline not found, skipping")
         return None
 
-    df = pd.read_csv(cusparse_file)
+    df = pd.read_csv(cusparse_file, comment='#')
     # Assume format: sparsity (0-1), time_us (including conversion)
     df['density'] = (1.0 - df['sparsity']) * 100.0
     return df[['density', 'time_us']]

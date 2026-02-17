@@ -48,7 +48,7 @@ def run_cublas_baseline(sizes, output_file):
         # Read results
         summary_file = Path("/tmp/cublas_baseline/summary.csv")
         if summary_file.exists():
-            df = pd.read_csv(summary_file)
+            df = pd.read_csv(summary_file, comment='#')
             df = df[df['kernel'] != 'PREPROCESS']
             time_us = df['kernel_time_us'].mean()
             results.append({'size': size, 'time_us': time_us})

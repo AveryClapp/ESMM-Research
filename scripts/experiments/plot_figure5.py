@@ -36,7 +36,7 @@ def load_esmm_data():
         print("Please run: bash scripts/experiments/05_collect_figure5_data.sh")
         sys.exit(1)
 
-    df = pd.read_csv(summary_file)
+    df = pd.read_csv(summary_file, comment='#')
 
     # Filter out preprocessing
     df = df[df['kernel'] != 'PREPROCESS'].copy()
@@ -57,7 +57,7 @@ def load_cublas_data():
     cublas_file = DATA_DIR / "cublas_baseline.csv"
 
     if cublas_file.exists():
-        df = pd.read_csv(cublas_file)
+        df = pd.read_csv(cublas_file, comment='#')
         # Assume format: size, time_us
         df['kernel'] = 'cuBLAS'
         df['kernel_time_us'] = df['time_us']
@@ -65,7 +65,7 @@ def load_cublas_data():
         # Fallback: use K10 dense reference
         summary_file = DATA_DIR / "cublas_reference" / "summary.csv"
         if summary_file.exists():
-            df = pd.read_csv(summary_file)
+            df = pd.read_csv(summary_file, comment='#')
             df = df[df['kernel'] != 'PREPROCESS']
             df['kernel'] = 'cuBLAS'
         else:

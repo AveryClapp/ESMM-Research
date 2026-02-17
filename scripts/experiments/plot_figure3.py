@@ -57,7 +57,7 @@ def load_data():
         print("Please run: bash scripts/experiments/03_collect_figure3_data.sh")
         sys.exit(1)
 
-    df = pd.read_csv(summary_file)
+    df = pd.read_csv(summary_file, comment='#')
 
     # Filter out preprocessing
     df = df[df['kernel'] != 'PREPROCESS'].copy()

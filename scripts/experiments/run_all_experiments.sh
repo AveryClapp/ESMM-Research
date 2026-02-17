@@ -44,9 +44,9 @@ if python3 -c "import pandas, matplotlib, numpy" 2>/dev/null; then
     echo "✓ Python dependencies OK"
 else
     echo "WARNING: Missing Python dependencies. Installing..."
-    pip install pandas matplotlib numpy || {
+    python3 -m pip install pandas matplotlib numpy || {
         echo "ERROR: Failed to install dependencies. Please run manually:"
-        echo "  pip install pandas matplotlib numpy"
+        echo "  python3 -m pip install pandas matplotlib numpy"
         exit 1
     }
     echo "✓ Python dependencies installed"
@@ -100,14 +100,8 @@ echo "[4/5] Collecting data for Figure 4 (Batch Amortization)..."
 bash scripts/experiments/04_collect_figure4_data.sh
 
 echo ""
-echo "[5/5] Collecting data for Figure 5 (Matrix Scaling - Optional)..."
-read -p "Run Figure 5 experiment? (takes ~30 min) (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    bash scripts/experiments/05_collect_figure5_data.sh
-else
-    echo "Skipping Figure 5."
-fi
+echo "[5/5] Collecting data for Figure 5 (Matrix Scaling)..."
+bash scripts/experiments/05_collect_figure5_data.sh
 
 echo ""
 echo "======================================"

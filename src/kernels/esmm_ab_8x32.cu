@@ -1,6 +1,6 @@
 #pragma once
 
-// K28: Joint A+B sparsity, 8x32 tile granularity
+// K21: Joint A+B sparsity, 8x32 tile granularity
 // Each 8-row sub-tile has independent pattern (WMITER=4 gives 4 patterns per warp)
 
 #include <cuda_runtime.h>

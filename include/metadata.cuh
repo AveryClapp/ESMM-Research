@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
+#define WARPSIZE 32
+
 /*
  * ============================================================================
  * ESMM Research Project - Sparsity Metadata Structures

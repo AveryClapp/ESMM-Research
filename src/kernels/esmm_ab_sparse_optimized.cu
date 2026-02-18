@@ -1,6 +1,6 @@
 #pragma once
 
-// K24: Joint A+B sparsity with zero-overhead inner loop
+// K20: Joint A+B sparsity with zero-overhead inner loop
 // Direct bit checking (no offset array), sequential iteration
 
 #include <cuda_runtime.h>

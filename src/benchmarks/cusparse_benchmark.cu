@@ -68,7 +68,6 @@ int main(int argc, char* argv[]) {
     }
 
     int M = N, K = N;
-    long long flops = 2LL * N * N * N;
 
     srand(42);
 
@@ -103,16 +102,17 @@ int main(int argc, char* argv[]) {
     cusparseDnMatDescr_t dnA;
     CHECK_CUSPARSE(cusparseCreateDnMat(&dnA, M, K, K, dA, CUDA_R_32F, CUSPARSE_ORDER_ROW));
 
-    // Sparse CSR descriptor - start with nnz=0, fill after analysis
+    // Sparse CSR descriptor - start with nnz=0, fill after analysis.
+    // Use 32-bit indices: M,K <= 16384 so max index fits in int32_t.
     cusparseSpMatDescr_t spA;
-    int64_t* d_csr_offsets;
-    int64_t* d_csr_cols;
+    int32_t* d_csr_offsets;
+    int32_t* d_csr_cols;
     float*   d_csr_vals;
-    CHECK_CUDA(cudaMalloc(&d_csr_offsets, (M + 1) * sizeof(int64_t)));
+    CHECK_CUDA(cudaMalloc(&d_csr_offsets, (M + 1) * sizeof(int32_t)));
 
     CHECK_CUSPARSE(cusparseCreateCsr(&spA, M, K, 0,
                                      d_csr_offsets, NULL, NULL,
-                                     CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I,
+                                     CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
 
     // Analysis pass: determine nnz and fill row offsets
@@ -129,9 +129,11 @@ int main(int argc, char* argv[]) {
     // Get nnz from the sparse descriptor
     int64_t rows64, cols64, nnz;
     CHECK_CUSPARSE(cusparseSpMatGetSize(spA, &rows64, &cols64, &nnz));
+    // Effective FLOP count: SpMM does 2*nnz*N multiply-adds (not 2*M*K*N)
+    double actual_flops = 2.0 * (double)nnz * N;
 
     // Allocate CSR column-index and values arrays now that we know nnz
-    CHECK_CUDA(cudaMalloc(&d_csr_cols, nnz * sizeof(int64_t)));
+    CHECK_CUDA(cudaMalloc(&d_csr_cols, nnz * sizeof(int32_t)));
     CHECK_CUDA(cudaMalloc(&d_csr_vals, nnz * sizeof(float)));
     CHECK_CUSPARSE(cusparseCsrSetPointers(spA, d_csr_offsets, d_csr_cols, d_csr_vals));
 
@@ -189,7 +191,10 @@ int main(int argc, char* argv[]) {
     double spmm_us = (double)(spmm_ms / runs) * 1000.0;
 
     // ---- Band 2: total = dense->CSR conversion + SpMM ----
-    for (int i = 0; i < 2; i++) {
+    // Note: dA must not be modified between the analysis pass and this loop;
+    // cusparseDenseToSparse_convert writes into CSR arrays sized for the nnz
+    // determined by the earlier analysis pass.
+    for (int i = 0; i < 3; i++) {
         CHECK_CUSPARSE(cusparseDenseToSparse_convert(handle, dnA, spA,
                                                       CUSPARSE_DENSETOSPARSE_ALG_DEFAULT,
                                                       conv_buf));
@@ -221,8 +226,8 @@ int main(int argc, char* argv[]) {
     CHECK_CUDA(cudaEventElapsedTime(&total_ms, t0, t1));
     double total_us = (double)(total_ms / runs) * 1000.0;
 
-    double spmm_gflops  = (double)flops / (spmm_us  * 1e-6) / 1e9;
-    double total_gflops = (double)flops / (total_us * 1e-6) / 1e9;
+    double spmm_gflops  = actual_flops / (spmm_us  * 1e-6) / 1e9;
+    double total_gflops = actual_flops / (total_us * 1e-6) / 1e9;
 
     printf("%d,%.4f,%.3f,%.3f,%.2f,%.2f\n",
            N, density, spmm_us, total_us, spmm_gflops, total_gflops);

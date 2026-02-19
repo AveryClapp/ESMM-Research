@@ -6,6 +6,7 @@ Left panel: absolute time (ms) grouped bar chart.
 Right panel: speedup vs cuBLAS line chart.
 """
 
+import os
 import sys
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -85,8 +86,8 @@ def get_series(cusparse_df, esmm_df):
 
     k15_data = esmm_df[esmm_df['kernel'] == 15]
     if k15_data.empty:
-        print("WARNING: K15 (cuBLAS) not found, using fallback 7200 µs")
-        cublas_us = 7200.0
+        print("WARNING: K15 (cuBLAS) not found, using fallback 7210 µs")
+        cublas_us = 7210.0
     else:
         cublas_us = float(k15_data['kernel_time_us'].mean())
 
@@ -210,8 +211,8 @@ def plot_comparison(spmm_us, total_us, k25_us, cublas_us):
     ax2.grid(True, alpha=0.3, zorder=0)
 
     all_speedups = spmm_speedup + total_speedup + k25_speedup
-    max_sp = max(all_speedups)
-    min_sp = min(all_speedups)
+    max_sp = np.nanmax(all_speedups)
+    min_sp = np.nanmin(all_speedups)
     ax2.set_ylim(min(0, min_sp * 0.85), max_sp * 1.2)
 
     plt.tight_layout()
@@ -242,7 +243,6 @@ def main():
     print("\nGenerating plot...")
     out_pdf, out_png = plot_comparison(spmm_us, total_us, k25_us, cublas_us)
 
-    import os
     pdf_bytes = os.path.getsize(out_pdf)
     png_bytes = os.path.getsize(out_png)
     print(f"\nFile sizes: PDF={pdf_bytes:,} bytes, PNG={png_bytes:,} bytes")

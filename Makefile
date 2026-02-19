@@ -146,7 +146,7 @@ ncu-quick: build-ncu
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -f $(TARGET) $(PROD_TARGET) $(TEST_TARGET) $(PROFILE_TARGET) *.o profile.ncu-rep
+	rm -f $(TARGET) $(PROD_TARGET) $(TEST_TARGET) $(PROFILE_TARGET) $(CUSPARSE_BENCH) *.o profile.ncu-rep
 
 # Display build modes
 .PHONY: help
@@ -185,6 +185,18 @@ help:
 	@echo "  PROD_FLAGS: $(PROD_FLAGS)"
 	@echo "  NCU_FLAGS: $(NCU_FLAGS)"
 	@echo "  NCU_CMD: $(NCU_CMD)"
+
+# cuSPARSE benchmark (standalone, for comparison against K25)
+CUSPARSE_BENCH := cusparse_bench
+CUSPARSE_SRC   := src/benchmarks/cusparse_benchmark.cu
+
+.PHONY: cusparse_bench
+cusparse_bench: $(CUSPARSE_BENCH)
+
+$(CUSPARSE_BENCH): $(CUSPARSE_SRC)
+	@echo "Building cuSPARSE benchmark..."
+	$(NVCC) $(PROD_FLAGS) $(CUSPARSE_SRC) -o $(CUSPARSE_BENCH) $(LIBS)
+	@echo "Build complete: ./$(CUSPARSE_BENCH)"
 
 .PHONY: info
 info: help

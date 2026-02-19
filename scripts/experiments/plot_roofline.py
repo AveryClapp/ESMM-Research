@@ -106,8 +106,8 @@ def plot_roofline():
                label=f'Ridge point ({RIDGE_POINT:.0f} FLOP/byte)')
 
     # Shade memory-bound / compute-bound regions
-    ax.fill_betweenx([0, PEAK_GFLOPS], 0.1, RIDGE_POINT, alpha=0.05, color='blue')
-    ax.fill_betweenx([0, PEAK_GFLOPS], RIDGE_POINT, 10000, alpha=0.05, color='red')
+    ax.fill_betweenx([10, PEAK_GFLOPS], 0.1, RIDGE_POINT, alpha=0.05, color='blue')
+    ax.fill_betweenx([10, PEAK_GFLOPS], RIDGE_POINT, 10000, alpha=0.05, color='red')
 
     # K25 points: varying density at N=4096
     sc1 = ax.scatter(k25_fig1['ai'], k25_fig1['gflops'],
@@ -147,8 +147,9 @@ def plot_roofline():
     ax.set_ylim(10, PEAK_GFLOPS * 2)
     ax.set_xlabel('Arithmetic Intensity (FLOP/byte)', fontsize=13, fontweight='bold')
     ax.set_ylabel('Effective Performance (GFLOPS)', fontsize=13, fontweight='bold')
-    ax.set_title('Roofline Model: AB-Fused (K25) on A10G\n(Analytical AI, NCU-timed execution)',
-                 fontsize=14, fontweight='bold')
+    ax.set_title('Roofline Model: AB-Fused (K25) on A10G\n'
+                 '(Analytical AI assumes dense A+B+C traffic; actual AI lower due to sparse overhead)',
+                 fontsize=12, fontweight='bold')
     ax.legend(fontsize=10, loc='upper left')
     ax.grid(True, which='both', alpha=0.2)
 

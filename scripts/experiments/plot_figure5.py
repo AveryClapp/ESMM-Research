@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Figure 5: Matrix Size Scaling
-Shows how AB-Fused (K25) and cuBLAS scale across matrix sizes at 50% density.
+Shows how AB-Fused (K25) and cuBLAS scale across matrix sizes at 25% density.
 cuBLAS baseline measured via NCU (K15) for methodology consistency.
 """
 

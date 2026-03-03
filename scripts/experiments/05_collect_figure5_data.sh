@@ -1,6 +1,6 @@
 #!/bin/bash
 # Experiment 5: Matrix Size Scaling (Figure 5)
-# Compares AB-Fused (K25) and cuBLAS (K15) across matrix sizes at 50% sparsity.
+# Compares AB-Fused (K25) and cuBLAS (K15) across matrix sizes at 25% sparsity.
 # K15 is profiled via NCU alongside K25 for methodology consistency.
 
 set -e

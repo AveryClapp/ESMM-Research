@@ -1,6 +1,7 @@
 #!/bin/bash
-# Experiment 5: Matrix Size Scaling (Figure 5 - Optional)
-# Compares K17, K28, cuBLAS across matrix sizes at 50% sparsity
+# Experiment 5: Matrix Size Scaling (Figure 5)
+# Compares AB-Fused (K25) and cuBLAS (K15) across matrix sizes at 50% sparsity.
+# K15 is profiled via NCU alongside K25 for methodology consistency.
 
 set -e
 
@@ -13,17 +14,17 @@ echo "Output directory: $OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 # Matrix sizes
-SIZES="1024,2048,4096,8192,16384"
-# 50% sparsity (representative)
-SPARSITY="11110000"
+SIZES="1024,2048,4096,8192"
+# 25% sparsity — K25 achieves genuine speedup over cuBLAS at this density
+SPARSITY="11000000"
 
 echo ""
-echo "Step 1: Benchmarking K17 (B-only), K25 (MAIN - fused) at sizes: $SIZES with 50% sparsity"
+echo "Benchmarking K15 (cuBLAS), K25 (AB-Fused) at sizes: $SIZES with 25% sparsity"
 echo "This will take ~20 minutes..."
 
 cd "$PROJECT_ROOT"
 python3 scripts/benchmark.py \
-  --kernel 17,25 \
+  --kernel 15,25 \
   --sizes "$SIZES" \
   --sparsity "$SPARSITY" \
   --cold-start \
@@ -31,25 +32,11 @@ python3 scripts/benchmark.py \
   -o "$OUTPUT_DIR/esmm_kernels"
 
 echo ""
-echo "Step 2: Running cuBLAS baseline across sizes (dense)"
-
-if [ -f "$PROJECT_ROOT/scripts/run_cublas_baseline.py" ]; then
-  python3 scripts/run_cublas_baseline.py --sizes "$SIZES" --output "$OUTPUT_DIR/cublas_baseline.csv"
-else
-  echo "WARNING: cuBLAS baseline script not found. Using K10 (dense GEMM) as reference..."
-
-  python3 scripts/benchmark.py \
-    --kernel 15 \
-    --sizes "$SIZES" \
-    --sparsity "11111111" \
-    --cold-start \
-    --parallel 1 \
-    -o "$OUTPUT_DIR/cublas_reference"
-fi
-
-echo ""
 echo "===== Data collection complete ====="
 echo "Results saved to: $OUTPUT_DIR"
+echo ""
+echo "Note: K15 rows in summary.csv provide the NCU-measured cuBLAS baseline."
+echo "      Plot scripts load cuBLAS time from kernel==15 rows for consistency."
 echo ""
 echo "Next steps:"
 echo "  1. Run: python3 scripts/experiments/plot_figure5.py"

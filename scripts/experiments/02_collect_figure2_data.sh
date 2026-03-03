@@ -13,7 +13,7 @@ echo "Output directory: $OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 # Matrix sizes
-SIZES="1024,2048,4096,8192,16384"
+SIZES="1024,2048,4096,8192"
 # 50% sparsity (representative)
 SPARSITY="11110000"
 

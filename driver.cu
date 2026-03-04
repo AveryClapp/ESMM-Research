@@ -17,7 +17,7 @@ using std::cout;
 using std::endl;
 using std::cin;
 
-static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25};
+static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25, 26};
 
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
                       float* d_A, float* d_B, float* d_C,
@@ -85,6 +85,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_simple_fused(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_ab_simple_fused_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 26: // A+B Optimized V2 (K20 + Block Skip + Float4)
+        if (check_results) {
+            res = run_esmm_ab_optimized_v2(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_optimized_v2_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
 

@@ -12,6 +12,7 @@
 #include "../src/kernels/esmm_ab_sparse_optimized.cu"
 #include "../src/kernels/esmm_ab_8x32.cu"
 #include "../src/kernels/esmm_ab_simple_fused.cu"
+#include "../src/kernels/esmm_ab_optimized_v2.cu"
 #include <chrono>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -473,4 +474,70 @@ bool run_esmm_ab_simple_fused(int rows, int cols, int inners, float *d_A, float 
 bool run_esmm_ab_simple_fused_no_check(int rows, int cols, int inners, float *d_A,
                                        float *d_B, float *d_C, int runs) {
   return run_esmm_ab_simple_fused(rows, cols, inners, d_A, d_B, d_C, nullptr, nullptr, runs, false);
+}
+
+// ============================================================================
+// K26: A+B Sparse OPTIMIZED V2 (K20 + block-level skip + float4 inner loop)
+// 32-row A granularity: matches the 32-row block structure in the A matrix,
+// giving finer-grained skip decisions than K20's 64-row granularity.
+// ============================================================================
+bool run_esmm_ab_optimized_v2(int rows, int cols, int inners, float *d_A, float *d_B,
+                               float *d_C, float *h_C, float *h_C_ref, int runs,
+                               bool verify) {
+  const uint NUM_THREADS = 256;  // NUM_WARPS=8 (2 warp rows × 4 warp cols) × 32
+  const uint BN = 128;
+  const uint BM = 64;
+  const uint BK = 8;
+  const uint WN = 32;
+  const uint WM = 32;            // 32-row A granularity (was 64 in K20)
+  const uint WNITER = 2;
+  const uint TN = 8;
+  const uint TM = 1;
+
+  dim3 blockDim(NUM_THREADS);
+  dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start);
+
+  for (int i = 0; i < runs; i++) {
+    cudaMemset(d_C, 0, rows * cols * sizeof(float));
+    ABPatternMetadata meta = preprocess_ab<BK, WM, WN>(d_A, d_B, rows, cols, inners);
+    esmm_ab_optimized_v2<BM, BN, BK, WM, WN, WNITER, TM, TN, NUM_THREADS>
+        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    cudaDeviceSynchronize();
+    free_ab_pattern_metadata(meta);
+  }
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("Kernel time: %.3f ms (avg: %.3f ms)\n", milliseconds, milliseconds / runs);
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+    return false;
+  }
+
+  if (verify) {
+    cudaMemcpy(h_C, d_C, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+    return verifyResults(h_C, h_C_ref, rows * cols);
+  }
+  return true;
+}
+
+bool run_esmm_ab_optimized_v2(int rows, int cols, int inners, float *d_A, float *d_B,
+                               float *d_C, float *h_C, float *h_C_ref, int runs) {
+  return run_esmm_ab_optimized_v2(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true);
+}
+bool run_esmm_ab_optimized_v2_no_check(int rows, int cols, int inners, float *d_A,
+                                       float *d_B, float *d_C, int runs) {
+  return run_esmm_ab_optimized_v2(rows, cols, inners, d_A, d_B, d_C, nullptr, nullptr, runs, false);
 }

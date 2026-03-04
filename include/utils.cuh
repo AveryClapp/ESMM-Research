@@ -13,7 +13,7 @@
 using std::cout;
 using std::endl;
 
-static const std::set<int> VALID_KERNEL_SET = {14, 15, 16, 17, 20, 21, 25};
+static const std::set<int> VALID_KERNEL_SET = {14, 15, 16, 17, 20, 21, 25, 26};
 
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
@@ -54,13 +54,14 @@ const char* get_kernel_name(int kernel_choice) {
     case 20: return "ESMM A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop)";
     case 21: return "ESMM A+B Sparse - 8x32 Granularity";
     case 25: return "ESMM A+B Simple Fused (Main Contribution)";
+    case 26: return "ESMM A+B Optimized V2 (K20 + 32-row + Block Skip + Float4)";
     default: return "Unknown Kernel";
   }
 }
 
 void print_usage(const char* program_name) {
   cout << "Usage: " << program_name << " [kernel_choice] [runs] [options]" << endl;
-  cout << "\nAvailable kernels: 14, 15, 16, 17, 20, 21, 25" << endl;
+  cout << "\nAvailable kernels: 14, 15, 16, 17, 20, 21, 25, 26" << endl;
   cout << "  14: A-Only Sparse (Offset List, Templated Dispatch)" << endl;
   cout << "  15: cuBLAS baseline" << endl;
   cout << "  16: A-Sparse Block-wise (Warp-Granularity Patterns)" << endl;
@@ -68,11 +69,12 @@ void print_usage(const char* program_name) {
   cout << "  20: A+B Sparse OPTIMIZED (Zero-Overhead Inner Loop)" << endl;
   cout << "  21: A+B Sparse - 8x32 Granularity" << endl;
   cout << "  25: A+B Simple Fused (Main Contribution)" << endl;
+  cout << "  26: A+B Optimized V2 (K20 + 32-row + Block Skip + Float4)" << endl;
   cout << "\nKernel selection formats:" << endl;
   cout << "  Single:   25          (run K25)" << endl;
   cout << "  Multiple: \"20,21,25\" (comma-separated)" << endl;
   cout << "  Range:    \"14-17\"    (kernels in range that are valid)" << endl;
-  cout << "  All:      all         (all 7 kernels)" << endl;
+  cout << "  All:      all         (all 8 kernels)" << endl;
   cout << "\nOptions:" << endl;
   cout << "  --verbose, -v       Enable verbose output" << endl;
   cout << "  --no-check, -n      Skip result verification (performance-only mode)" << endl;

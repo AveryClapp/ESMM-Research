@@ -290,15 +290,47 @@ __global__ void preprocess_b_fused(
 }
 
 // ============================================================================
-// Unified Preprocessing Wrapper
-// Replaces preprocess_ab_patterns<BK,WM,WN> (K20) and
-// preprocess_ab_patterns_8x32<BK,TILE_M,WN> (K21).
-// K20 calls: preprocess_ab<8, 64, 32>(d_A, d_B, M, N, K)
-// K21 calls: preprocess_ab<8,  8, 32>(d_A, d_B, M, N, K)
+// Production Preprocessing — lean, no diagnostics
+// Just allocates pattern buffers and runs the two pattern kernels.
 // ============================================================================
 
 template <const int BK = 8, const int TILE_M_A = 64, const int WN = 32>
 ABPatternMetadata preprocess_ab(
+    const float* d_A, const float* d_B,
+    int M, int N, int K
+) {
+    ABPatternMetadata meta;
+    meta.numMBlocks = M / TILE_M_A;
+    meta.numNBlocks = N / WN;
+    meta.numKBlocks = K / BK;
+    meta.owns_b_patterns = true;
+    meta.a_sparsity = 0.0f;
+    meta.b_sparsity = 0.0f;
+    meta.joint_sparsity = 0.0f;
+
+    int a_total = meta.numMBlocks * meta.numKBlocks;
+    int b_total = meta.numNBlocks * meta.numKBlocks;
+
+    cudaMalloc(&meta.d_a_patterns, a_total * sizeof(uint8_t));
+    cudaMalloc(&meta.d_b_patterns, b_total * sizeof(uint8_t));
+
+    constexpr int NUM_THREADS = 256;
+
+    preprocess_a_patterns_kernel<BK, TILE_M_A, NUM_THREADS>
+        <<<meta.numMBlocks, NUM_THREADS>>>(M, K, d_A, meta.d_a_patterns);
+
+    preprocess_b_patterns_kernel<BK, WN, NUM_THREADS>
+        <<<meta.numNBlocks, NUM_THREADS>>>(K, N, d_B, meta.d_b_patterns);
+
+    return meta;
+}
+
+// ============================================================================
+// Debug Preprocessing — with analysis, stats, and timing
+// ============================================================================
+
+template <const int BK = 8, const int TILE_M_A = 64, const int WN = 32>
+ABPatternMetadata preprocess_ab_debug(
     const float* d_A, const float* d_B,
     int M, int N, int K
 ) {
@@ -313,8 +345,6 @@ ABPatternMetadata preprocess_ab(
 
     cudaMalloc(&meta.d_a_patterns, a_total * sizeof(uint8_t));
     cudaMalloc(&meta.d_b_patterns, b_total * sizeof(uint8_t));
-    cudaMemset(meta.d_a_patterns, 0, a_total * sizeof(uint8_t));
-    cudaMemset(meta.d_b_patterns, 0, b_total * sizeof(uint8_t));
 
     constexpr int NUM_THREADS = 256;
 

@@ -39,10 +39,11 @@
 *.app
 
 # Project-specific executables
-exec 
+exec
 exec_dev
 exec_profile
 exec_prod
+cusparse_bench
 
 # Python
 __pycache__/
@@ -84,5 +85,8 @@ venv/
 env/
 
 # Benchmark outputs
-benchmarks/
+benchmarks/*
+!benchmarks/paper_data/
+benchmarks/paper_data/*
+!benchmarks/paper_data/*.csv
 *.log

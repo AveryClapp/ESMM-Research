@@ -453,8 +453,9 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
             metric_unit = parts[13]  # "Metric Unit" column
             metric_value = parts[14]  # "Metric Value" column
 
-            # Determine if this is a preprocessing kernel (any kernel with "preprocess" in name)
-            is_preprocess = "preprocess" in kernel_name.lower()
+            # Determine if this is a preprocessing kernel
+            kn_lower = kernel_name.lower()
+            is_preprocess = "preprocess" in kn_lower or "analyze" in kn_lower
 
             if is_preprocess:
                 # Create entry for this preprocessing kernel if not exists
@@ -517,14 +518,10 @@ def extract_metrics_from_report(ncu_rep_file, metrics_list):
 def generate_summary_csv(results, output_dir, cold_start_mode):
     """Generate summary CSV from all results
 
-    Includes preprocessing time once per matrix size (not per kernel)
-    AND adds preprocessing time to kernel time for total end-to-end time
+    Each kernel row reports its own end-to-end time (compute + its own preprocessing).
+    Preprocessing kernels are also written as separate PREPROCESS rows per run.
     """
     csv_path = output_dir / "summary.csv"
-
-    # Track preprocessing time per size for adding to kernel times
-    preprocess_time_by_size = {}
-    preprocess_reported = {}
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -539,6 +536,8 @@ def generate_summary_csv(results, output_dir, cold_start_mode):
                 "sparsity",
                 "pattern",
                 "kernel_time_us",
+                "preprocess_time_us",
+                "total_time_us",
                 "memory_throughput_pct",
                 "compute_throughput_pct",
                 "ncu_report",
@@ -554,75 +553,52 @@ def generate_summary_csv(results, output_dir, cold_start_mode):
             metrics = extract_metrics_from_report(result["output_file"], [])
 
             if not metrics:
-                # No metrics extracted
                 writer.writerow(
                     [
                         result["kernel"],
                         result["size"],
                         result["sparsity_label"],
                         result["sparsity_pattern"],
-                        "N/A",
-                        "N/A",
-                        "N/A",
+                        "N/A", "N/A", "N/A", "N/A", "N/A",
                         result["output_file"].name,
                         "",
                     ]
                 )
                 continue
 
-            # Cache total preprocessing time per size
-            size = result["size"]
-            total_preprocess_time = metrics.get("total_preprocess_time_us", 0.0)
             preprocess_kernels = metrics.get("preprocess_kernels", [])
+            total_preprocess_time = metrics.get("total_preprocess_time_us", 0.0)
 
-            if total_preprocess_time > 0 and size not in preprocess_time_by_size:
-                preprocess_time_by_size[size] = total_preprocess_time
+            # Write each preprocessing kernel as a separate row
+            for preproc in preprocess_kernels:
+                pt = preproc.get("kernel_time_us")
+                writer.writerow(
+                    [
+                        "PREPROCESS",
+                        result["size"],
+                        result["sparsity_label"],
+                        result["sparsity_pattern"],
+                        f"{pt:.3f}" if isinstance(pt, float) else "N/A",
+                        "", "",
+                        "N/A", "N/A",
+                        result["output_file"].name,
+                        preproc.get("kernel_name", ""),
+                    ]
+                )
 
-            # Write preprocessing entries once per size (all preprocessing kernels)
-            if preprocess_kernels and size not in preprocess_reported:
-                preprocess_reported[size] = True
-
-                # Write each preprocessing kernel separately
-                for preproc in preprocess_kernels:
-                    writer.writerow(
-                        [
-                            "PREPROCESS",  # Special kernel ID
-                            size,
-                            result["sparsity_label"],
-                            result["sparsity_pattern"],
-                            (
-                                f"{preproc.get('kernel_time_us', 'N/A'):.3f}"
-                                if isinstance(preproc.get("kernel_time_us"), float)
-                                else "N/A"
-                            ),
-                            (
-                                f"{preproc.get('memory_throughput_pct', 'N/A'):.2f}"
-                                if isinstance(preproc.get("memory_throughput_pct"), float)
-                                else "N/A"
-                            ),
-                            (
-                                f"{preproc.get('compute_throughput_pct', 'N/A'):.2f}"
-                                if isinstance(preproc.get("compute_throughput_pct"), float)
-                                else "N/A"
-                            ),
-                            result["output_file"].name,
-                            preproc.get("kernel_name", ""),  # Actual preprocessing kernel name
-                        ]
-                    )
-
-            # Write main kernel metrics (with preprocessing time added if applicable)
+            # Write main kernel row with its own preprocessing time
             main = metrics.get("main_kernel")
             if main:
-                # Get kernel time and add preprocessing if it exists for this size
                 kernel_time = main.get("kernel_time_us")
-                if isinstance(kernel_time, float) and size in preprocess_time_by_size:
-                    # Add preprocessing time to kernel time for total end-to-end time
-                    total_time = kernel_time + preprocess_time_by_size[size]
-                    kernel_time_str = f"{total_time:.3f}"
-                elif isinstance(kernel_time, float):
+                if isinstance(kernel_time, float):
                     kernel_time_str = f"{kernel_time:.3f}"
+                    total_time = kernel_time + total_preprocess_time
+                    total_time_str = f"{total_time:.3f}"
+                    preprocess_str = f"{total_preprocess_time:.3f}"
                 else:
                     kernel_time_str = "N/A"
+                    total_time_str = "N/A"
+                    preprocess_str = "N/A"
 
                 writer.writerow(
                     [
@@ -631,6 +607,8 @@ def generate_summary_csv(results, output_dir, cold_start_mode):
                         result["sparsity_label"],
                         result["sparsity_pattern"],
                         kernel_time_str,
+                        preprocess_str,
+                        total_time_str,
                         (
                             f"{main.get('memory_throughput_pct', 'N/A'):.2f}"
                             if isinstance(main.get("memory_throughput_pct"), float)
@@ -642,7 +620,7 @@ def generate_summary_csv(results, output_dir, cold_start_mode):
                             else "N/A"
                         ),
                         result["output_file"].name,
-                        "",  # No kernel_name for main kernels (could add if needed)
+                        "",
                     ]
                 )
             else:
@@ -652,9 +630,7 @@ def generate_summary_csv(results, output_dir, cold_start_mode):
                         result["size"],
                         result["sparsity_label"],
                         result["sparsity_pattern"],
-                        "N/A",
-                        "N/A",
-                        "N/A",
+                        "N/A", "N/A", "N/A", "N/A", "N/A",
                         result["output_file"].name,
                         "",
                     ]

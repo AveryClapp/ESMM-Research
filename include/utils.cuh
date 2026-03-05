@@ -13,7 +13,7 @@
 using std::cout;
 using std::endl;
 
-static const std::set<int> VALID_KERNEL_SET = {14, 15, 16, 17, 20, 21, 25, 26};
+static const std::set<int> VALID_KERNEL_SET = {14, 15, 16, 17, 20, 21, 25, 26, 27, 28, 29};
 
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
@@ -55,6 +55,9 @@ const char* get_kernel_name(int kernel_choice) {
     case 21: return "ESMM A+B Sparse - 8x32 Granularity";
     case 25: return "ESMM A+B Simple Fused (Main Contribution)";
     case 26: return "ESMM A+B Optimized V2 (K20 + 32-row + Block Skip + Float4)";
+    case 27: return "ESMM A+B Ablation (32-row only, no Block Skip, no Float4)";
+    case 28: return "ESMM A+B GMem-32 (K25 with 32-row, global mem patterns)";
+    case 29: return "ESMM A+B Optimized V3 (K26 + templated smem + float2 A-loads)";
     default: return "Unknown Kernel";
   }
 }
@@ -70,6 +73,9 @@ void print_usage(const char* program_name) {
   cout << "  21: A+B Sparse - 8x32 Granularity" << endl;
   cout << "  25: A+B Simple Fused (Main Contribution)" << endl;
   cout << "  26: A+B Optimized V2 (K20 + 32-row + Block Skip + Float4)" << endl;
+  cout << "  27: A+B Ablation (32-row only, no Block Skip, no Float4)" << endl;
+  cout << "  28: A+B GMem-32 (K25 with 32-row, global mem patterns)" << endl;
+  cout << "  29: A+B Optimized V3 (K26 + templated smem + float2 A-loads)" << endl;
   cout << "\nKernel selection formats:" << endl;
   cout << "  Single:   25          (run K25)" << endl;
   cout << "  Multiple: \"20,21,25\" (comma-separated)" << endl;
@@ -342,20 +348,15 @@ void randomize_matrix_B_blocklevel_fixed(float *mat, int K, int N,
     const int numNBlocks = N / WN;
     const float sparsity_threshold = block_sparsity_percent / 100.0f;
 
-    std::vector<uint8_t> k_patterns(numKBlocks);
-    for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-        uint8_t pattern = 0;
-        for (int bit = 0; bit < BK; bit++) {
-            if ((float)rand() / RAND_MAX >= sparsity_threshold) {
-                pattern |= (1 << bit);
-            }
-        }
-        k_patterns[kBlock] = pattern;
-    }
-
     for (int nBlock = 0; nBlock < numNBlocks; nBlock++) {
         for (int kBlock = 0; kBlock < numKBlocks; kBlock++) {
-            const uint8_t tile_pattern = k_patterns[kBlock];  // SAME for all N-blocks
+            // Independent pattern per (nBlock, kBlock) tile — mirrors A's approach
+            uint8_t tile_pattern = 0;
+            for (int bit = 0; bit < BK; bit++) {
+                if ((float)rand() / RAND_MAX >= sparsity_threshold) {
+                    tile_pattern |= (1 << bit);
+                }
+            }
 
             for (int col = 0; col < WN; col++) {
                 const int globalN = nBlock * WN + col;

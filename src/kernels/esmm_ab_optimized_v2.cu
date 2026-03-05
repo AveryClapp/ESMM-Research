@@ -18,7 +18,8 @@
 
 template <const int BM, const int BN, const int BK,
           const int WM, const int WN, const int WNITER,
-          const int TM, const int TN, const int NUM_THREADS>
+          const int TM, const int TN, const int NUM_THREADS,
+          const int MAX_K_BLOCKS>
 __global__ void __launch_bounds__(NUM_THREADS)
 esmm_ab_optimized_v2(
     int M, int N, int K,
@@ -48,14 +49,9 @@ esmm_ab_optimized_v2(
     const uint threadColInWarp = threadIdxInWarp % (WSUBN / TN);
     const uint threadRowInWarp = threadIdxInWarp / (WSUBN / TN);
 
-    // Shared memory
     __shared__ float As[BK * (BM + 1)];  // Padded to avoid bank conflicts
     __shared__ float Bs[BK * BN];
-    // Per-warp joint patterns (K20 style): fast shared-memory reads in K-loop
-    // MAX_K_BLOCKS=1024 supports K up to 8192 with BK=8
-    constexpr int MAX_K_BLOCKS = 1024;
     __shared__ uint8_t joint_smem[NUM_WARPS * MAX_K_BLOCKS];
-    // Block-level summary: OR across all warps, used to skip tile loads entirely
     __shared__ uint8_t block_joint[MAX_K_BLOCKS];
 
     // =========================================================================

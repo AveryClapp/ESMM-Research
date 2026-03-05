@@ -17,7 +17,7 @@ using std::cout;
 using std::endl;
 using std::cin;
 
-static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25, 26};
+static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25, 26, 27, 28, 29};
 
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
                       float* d_A, float* d_B, float* d_C,
@@ -87,11 +87,32 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_simple_fused_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
-    case 26: // A+B Optimized V2 (K20 + Block Skip + Float4)
+    case 26: // A+B Optimized V2 (K20 + 32-row + Block Skip + Float4)
         if (check_results) {
             res = run_esmm_ab_optimized_v2(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
         } else {
             res = run_esmm_ab_optimized_v2_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 27: // Ablation: 32-row only, no block skip, no float4
+        if (check_results) {
+            res = run_esmm_ab_optimized_v2_baseline(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_optimized_v2_baseline_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 28: // K25 with 32-row granularity (gmem patterns, block+warp skip, float4)
+        if (check_results) {
+            res = run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_gmem_32_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+        }
+        break;
+    case 29: // K26 + templated MAX_K_BLOCKS + float2 A-loads
+        if (check_results) {
+            res = run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+        } else {
+            res = run_esmm_ab_optimized_v3_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
         }
         break;
 

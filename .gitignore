@@ -71,9 +71,10 @@ time_trace.json
 comparison.csv
 *.csv
 
-# Documentation drafts (keep CLAUDE.md out of repo)
+# Documentation (never commit docs)
 CLAUDE.md
 CLEANUP_STATUS.md
+docs/
 
 # Temporary files
 temp_*.cu
@@ -83,6 +84,11 @@ temp_*.cu
 .venv/
 venv/
 env/
+
+# Large data files
+*.zip
+weight_permutations/
+exports/
 
 # Benchmark outputs
 benchmarks/*

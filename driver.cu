@@ -152,6 +152,11 @@ int main(int argc, char *argv[]) {
     float random_sparsity_percent = 37.5f;
     unsigned int random_seed = 12345;
 
+    // Real weight loading
+    std::string load_matrix_a = "";
+    std::string load_matrix_b = "";
+    int load_M = 0, load_K = 0, load_N = 0;
+
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
@@ -228,6 +233,17 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
             }
+        } else if (arg == "--load-a") {
+            if (i + 1 >= argc) { cout << "Error: --load-a requires a path" << endl; return 1; }
+            load_matrix_a = argv[++i];
+        } else if (arg == "--load-b") {
+            if (i + 1 >= argc) { cout << "Error: --load-b requires a path" << endl; return 1; }
+            load_matrix_b = argv[++i];
+        } else if (arg == "--dims") {
+            if (i + 3 >= argc) { cout << "Error: --dims requires M K N" << endl; return 1; }
+            load_M = atoi(argv[++i]);
+            load_K = atoi(argv[++i]);
+            load_N = atoi(argv[++i]);
         } else if (i == 1) {
             if (isdigit(arg[0]) || arg == "all" || arg.find(',') != std::string::npos || arg.find('-') != std::string::npos) {
                 kernel_choices = parse_kernel_selection(arg);
@@ -294,13 +310,49 @@ int main(int argc, char *argv[]) {
         cout << endl << endl;
     }
 
+    // Apply loaded-matrix dimensions before allocating
+    bool load_mode = !load_matrix_a.empty() || !load_matrix_b.empty();
+    if (load_mode) {
+        if (load_M <= 0 || load_K <= 0 || load_N <= 0) {
+            cout << "Error: --dims M K N required with --load-a / --load-b" << endl;
+            return 1;
+        }
+        rows = load_M; inners = load_K; cols = load_N;
+    }
+
     float *h_A = (float *)malloc(rows * inners * sizeof(float));
     float *h_B = (float *)malloc(inners * cols * sizeof(float));
     float *h_C = (float *)malloc(rows * cols * sizeof(float));
     float *h_C_ref = (float *)malloc(rows * cols * sizeof(float));
 
     // Generate sparsity patterns based on mode
-    if (use_blockwise_sparsity) {
+    if (load_mode) {
+        auto load_bin = [](const std::string& path, float* buf, size_t n) -> bool {
+            if (path.empty()) return true;
+            FILE* f = fopen(path.c_str(), "rb");
+            if (!f) { printf("Error: cannot open %s\n", path.c_str()); return false; }
+            size_t nread = fread(buf, sizeof(float), n, f);
+            fclose(f);
+            if (nread != n) {
+                printf("Error: expected %zu floats, got %zu from %s\n", n, nread, path.c_str());
+                return false;
+            }
+            return true;
+        };
+        if (!load_bin(load_matrix_a, h_A, (size_t)rows * inners)) return 1;
+        if (!load_bin(load_matrix_b, h_B, (size_t)inners * cols)) return 1;
+        // If A not loaded, fill with random dense values (not zero — zero A skips everything)
+        if (load_matrix_a.empty()) {
+            srand(random_seed);
+            for (size_t i = 0; i < (size_t)rows * inners; i++)
+                h_A[i] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+        }
+        if (verbose) {
+            if (!load_matrix_a.empty()) cout << "Loaded A from: " << load_matrix_a << endl;
+            else cout << "A: random dense (seed=" << random_seed << ")" << endl;
+            if (!load_matrix_b.empty()) cout << "Loaded B from: " << load_matrix_b << endl;
+        }
+    } else if (use_blockwise_sparsity) {
         if (verbose) cout << "Generating block-level sparsity patterns..." << endl;
 
         int ones_count_a = 0;

@@ -1,165 +1,75 @@
 # ESMM: Emergent Sparsity Matrix Multiplication
 
-High-performance CUDA kernels for sparse matrix multiplication, exploiting pattern-based sparsity in neural network activations.
+ESMM is a CUDA SGEMM research project exploiting *joint* block-structured sparsity in both operands. The key insight is that when both A (activations) and B (weights) have zero blocks at the same positions, that K-iteration contributes nothing to C and can be skipped entirely. This multiplicative effect makes joint sparsity far more exploitable than single-matrix sparsity.
 
+The main contribution is **K29** — a warp-tiled SGEMM kernel with block- and warp-level skipping, smem-cached joint patterns, and tight templated shared memory allocation — benchmarked against cuBLAS on real LLM weight tensors.
 
 ## Quick Start
 
 ```bash
 # Build
-make dev
+make release          # optimized (exec_prod)
+make dev              # with assertions (exec_dev)
 
-# Run single kernel
-./exec_dev 15 10 --size 4096 --pattern 11110000
+# Run a kernel vs cuBLAS at 4096×4096, 50% block density
+./exec_prod 29,15 10 --blockwise --pattern 11110000 --size 4096
 
-# Run benchmark suite
-./scripts/benchmark.py --kernel 19 --sizes 2048,4096 --cold-start
+# Load a real weight matrix as B (random dense A generated automatically)
+./exec_prod 29 10 --load-b path/to/weight.bin --dims 4096 4096 4096 --no-check
 
-# Compare multiple kernels
-./exec_dev "10,12,15,20" 5 --blockwise --pattern 11110000
+# Profile with NCU
+sudo /usr/local/cuda-12.1/bin/ncu --set basic ./exec_prod 29 1 --blockwise --size 4096
 ```
 
-## Repository Structure
+## Where to Look
 
-```
-├── driver.cu              # Main entry point, CLI, verification
-├── src/
-│   ├── kernels/           # 29 kernel implementations (K1-K29)
-│   └── preprocessors/     # GPU pattern extraction kernels
-├── include/
-│   ├── runners.cuh        # Kernel wrapper functions
-│   ├── utils.cuh          # Matrix generation, validation, CLI parsing
-│   └── pattern_lut.cuh    # Precomputed offset tables
-├── old_kernels/           # Early GEMM optimization experiments (K1-9)
-├── scripts/
-│   └── benchmark.py       # Parallel NCU profiling automation
-├── tuning/                # Autotuning scripts and results
-└── docs/                  # Kernel walkthroughs and experiment notes
-```
+| What you want | Where to look |
+|---|---|
+| Kernel implementations | `src/kernels/` |
+| Preprocessing (pattern extraction) | `src/preprocessors/ab_preprocessor.cu` |
+| Kernel dispatch / runner wrappers | `include/runners.cuh` |
+| CLI, matrix setup, verification | `driver.cu` |
+| Synthetic benchmark suite | `scripts/benchmark.py` |
+| Real LLM weight benchmark | `scripts/benchmark_real_weights.py` |
+| Benchmark results & paper notes | `results/paper_report.md` |
+| Figure plotting scripts | `scripts/experiments/plot_figure*.py` |
+| NCU benchmark data | `benchmarks/` |
+| Archived experiments | `docs/archived_experiments/` |
 
-## Kernel Progression
+## Approach
 
-### Dense GEMM Baseline (K1-9)
-Progressive optimization from naive to warptiled GEMM:
-- K1: Naive → K9: 1D Warptiling (~20x improvement)
-- Techniques: Memory coalescing, shared memory blocking, vectorization, register tiling
+Sparsity is represented as 8-bit patterns over BK=8 K-slices. A pattern byte encodes which of the 8 columns in a tile are nonzero. Joint skipping fires when `a_pattern & b_pattern == 0` — i.e., no column is nonzero in both A and B simultaneously.
 
-### A-Matrix Sparsity (K10-16)
-Pattern-based skipping of zero elements in activation matrix:
-- **K16**: Block-wise warp-uniform patterns (best A-only)
-- 8×32 granularity, zero divergence, ~2x speedup at 50% sparsity
+**Block-level skip**: one warp ORs all warp-pair joints into a shared byte; if zero, all threads skip the tile load entirely.
 
-### B-Matrix Sparsity (K17-19)
-Exploiting sparsity in weight matrix:
-- **K17**: Warp-granularity (32-col blocks)
-- **K18**: TN-granularity (8-col blocks, higher divergence)
-- **K19**: Warp-uniform (simplest, best B-only)
+**Warp-level skip**: each warp checks its own joint; if zero, skips the inner accumulation loop.
 
-### Joint A+B Sparsity (K20-21)
-Multiplicative sparsity benefits from combined skipping:
-- **K20**: Coarse 64×32 granularity, zero-overhead inner loop
-- **K21**: Fine 8×32 granularity, independent sub-tile patterns (best overall)
-- **K22**: Medium 32×32 granularity (balanced)
+**Smem-cached patterns**: joint patterns are precomputed into shared memory before the K-loop, avoiding repeated global memory reads per iteration.
 
-## Implementation Highlights
-
-### Pattern Preprocessing
-- GPU-accelerated extraction of 8-bit sparsity patterns
-- Warp shuffle for efficient OR reduction
-- Shared memory transpose for coalesced access
-- Separate kernels for different granularities (8-row, 32-row, 64-row)
-
-### Zero-Divergence Skipping
-- Warp-uniform pattern checks (all threads agree)
-- Pattern indexed by warp-level tiles (not per-thread)
-- Direct bit testing with continue (no offset arrays)
-- Template dispatch for fully unrolled inner loops (K13-K18)
-
-### Memory Optimization
-- BK=8 for optimal L1 cache utilization
-- Double buffering with prefetch (K12)
-- Bank conflict avoidance via padding
-- Vectorized loads (float4) where possible
+Preprocessing runs as separate GPU kernels before the main GEMM. B patterns can be cached offline (weights are static); only A patterns need to be computed per call.
 
 ## Building
 
+Requires CUDA 12.0+, compute capability 7.0+ (Volta/Turing/Ampere).
+
 ```bash
-# Development build (with assertions)
-make dev
-
-# Release build (optimized)
-make release
-
-# Clean
+make release    # → exec_prod
+make dev        # → exec_dev
 make clean
 ```
 
-Requires CUDA Toolkit 12.0+ and compute capability 7.0+ (Volta or newer).
-
-## Benchmarking
-
-The `scripts/benchmark.py` tool automates NCU profiling with proper cold-start handling:
+## Benchmarking Real Weights
 
 ```bash
-# Single kernel, default sparsity levels
-./scripts/benchmark.py --kernel 19
-
-# Multiple kernels, custom sizes
-./scripts/benchmark.py -k 17,19,22 --sizes 2048,4096
-
-# Cold-start mode (matches manual profiling)
-./scripts/benchmark.py -k 22 --cold-start --parallel 1
-
-# Custom sparsity patterns
-./scripts/benchmark.py -k 22 --sparsity 11110000,11000000,10000000
+# Benchmark K29 and cuBLAS on LLM weight tensors
+python3 scripts/benchmark_real_weights.py \
+  --weights weight_permutations/ \
+  --kernels 15,29 \
+  --out results/real_weights_benchmark.csv
 ```
 
-Default patterns: 100% (11111111), 50% (11110000), 25% (11000000), 12.5% (10000000)
-
-See `python scripts/benchmark.py --help` for all options.
-
-## Sparsity Modes
-
-### Pattern-Based (default)
-Column-wise 8-bit patterns, useful for structured sparsity:
-```bash
-./exec_dev 19 1 --pattern 11110000  # 50% density
-```
-
-### Blockwise
-Block-level warp-uniform patterns (realistic workloads):
-```bash
-./exec_dev 19 1 --blockwise --pattern 11110000
-# Each 8×8 (A) or 8×32 (B) tile is fully dense or fully zero
-```
-
-### Random
-Unstructured sparsity for comparison:
-```bash
-./exec_dev 20 1 --random  # 37.5% sparsity
-```
-
-## Verification
-
-All kernels validate against cuBLAS with 1e-3 tolerance:
-```bash
-./exec_dev 16 1 --verbose           # With verification
-./exec_dev 16 100 --no-check        # Performance-only
-```
-
-## Research Notes
-
-Failed experiments archived in `docs/archived_experiments/`:
-
-Key finding: Joint A+B sparsity requires careful granularity tuning. Too fine (8×8) has high pattern overhead, too coarse (64×64) misses skipping opportunities. 8×32 (K28) strikes optimal balance.
-
-## Citation
-
-If you use this work, please cite:
-```
-[Publication details TBD]
-```
+Weights should be `.pt` files (2D float tensors) organized under a directory tree that encodes pruner, group size, permutation type, and sparsity in path components. See `scripts/benchmark_real_weights.py` for the expected naming convention.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).

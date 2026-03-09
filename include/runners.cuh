@@ -625,7 +625,8 @@ bool run_esmm_ab_optimized_v2_baseline_no_check(int rows, int cols, int inners, 
 }
 
 // ============================================================================
-// K28: K25 with 32-row A granularity (gmem pattern reads, block+warp skip, float4)
+// K28: K25 with 32-row A granularity (gmem pattern reads, block+warp skip, float2 A-loads)
+//      Templated MAX_K_BLOCKS for tight smem allocation (same dispatch as K29).
 // ============================================================================
 bool run_esmm_ab_gmem_32(int rows, int cols, int inners, float *d_A, float *d_B,
                           float *d_C, float *h_C, float *h_C_ref, int runs,
@@ -650,9 +651,23 @@ bool run_esmm_ab_gmem_32(int rows, int cols, int inners, float *d_A, float *d_B,
   for (int i = 0; i < runs; i++) {
     cudaMemset(d_C, 0, rows * cols * sizeof(float));
     ABPatternMetadata meta = preprocess_ab<BK, WM, WN>(d_A, d_B, rows, cols, inners);
-    esmm_ab_gmem_32<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS>
-        <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
-                                meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    if (meta.numKBlocks <= 128) {
+      esmm_ab_gmem_32<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS, 128>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                  meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    } else if (meta.numKBlocks <= 256) {
+      esmm_ab_gmem_32<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS, 256>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                  meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    } else if (meta.numKBlocks <= 512) {
+      esmm_ab_gmem_32<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS, 512>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                  meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    } else {
+      esmm_ab_gmem_32<BM, BN, BK, WM, WN, WNITER, TN, NUM_THREADS, 1024>
+          <<<gridDim, blockDim>>>(rows, cols, inners, d_A, d_B, d_C,
+                                  meta.d_a_patterns, meta.d_b_patterns, meta.numKBlocks);
+    }
     cudaDeviceSynchronize();
     free_ab_pattern_metadata(meta);
   }

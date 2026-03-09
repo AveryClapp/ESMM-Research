@@ -1,9 +1,10 @@
 #pragma once
 
 // K28: K25 with 32-row A granularity.
-// Global memory pattern reads (like K25), block+warp skip, float4 inner loop.
+// Global memory pattern reads (like K25), block+warp skip, float2 A-loads.
 // Uses preprocess_ab<8, 32, 32> — same preprocessor as K26/K27.
 // Isolates the effect of pattern storage (gmem vs smem) from granularity.
+// Templated MAX_K_BLOCKS for tight smem allocation (same dispatch as K29).
 
 #include <cuda_runtime.h>
 #include <cstdint>
@@ -18,7 +19,8 @@
 
 template <const int BM, const int BN, const int BK,
           const int WM, const int WN, const int WNITER,
-          const int TN, const int NUM_THREADS>
+          const int TN, const int NUM_THREADS,
+          const int MAX_K_BLOCKS>
 __global__ void __launch_bounds__(NUM_THREADS)
 esmm_ab_gmem_32(
     int M, int N, int K,
@@ -49,7 +51,6 @@ esmm_ab_gmem_32(
 
     __shared__ float As[BK * (BM + 1)];
     __shared__ float Bs[BK * BN];
-    constexpr int MAX_K_BLOCKS = 1024;
     __shared__ uint8_t block_joint[MAX_K_BLOCKS];
 
     // Block-level joint: OR across all warps, reading from global memory.

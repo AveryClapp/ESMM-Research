@@ -123,7 +123,6 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_compressed_k_no_check(rows, cols, inners, d_A, d_B, d_C, runs, skip_stats);
         }
         break;
-
     default:
         cout << "Invalid kernel choice: " << kernel_choice << endl;
         return false;

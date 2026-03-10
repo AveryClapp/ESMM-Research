@@ -897,7 +897,7 @@ bool run_esmm_ab_optimized_v3_no_check(int rows, int cols, int inners, float *d_
 }
 
 // ============================================================================
-// K30: K29 + compressed active K-block list + set-bit dotIdx iteration
+// K30: K29 + compressed active K-block list + set-bit dotIdx iteration (ablation, slower)
 // ============================================================================
 
 template <const int BM, const int BN, const int BK,

@@ -13,7 +13,7 @@
 using std::cout;
 using std::endl;
 
-static const std::set<int> VALID_KERNEL_SET = {14, 15, 16, 17, 20, 21, 25, 26, 27, 28, 29};
+static const std::set<int> VALID_KERNEL_SET = {14, 15, 16, 17, 20, 21, 25, 26, 27, 28, 29, 30};
 
 std::vector<int> parse_kernel_selection(const std::string& input) {
   std::vector<int> kernels;
@@ -58,6 +58,7 @@ const char* get_kernel_name(int kernel_choice) {
     case 27: return "ESMM A+B Ablation (32-row only, no Block Skip, no Float4)";
     case 28: return "ESMM A+B GMem-32 (K25 with 32-row, global mem patterns)";
     case 29: return "ESMM A+B Optimized V3 (K26 + templated smem + float2 A-loads)";
+    case 30: return "ESMM A+B Compressed-K (K29 + compressed K-list + set-bit dotIdx)";
     default: return "Unknown Kernel";
   }
 }
@@ -76,6 +77,7 @@ void print_usage(const char* program_name) {
   cout << "  27: A+B Ablation (32-row only, no Block Skip, no Float4)" << endl;
   cout << "  28: A+B GMem-32 (K25 with 32-row, global mem patterns)" << endl;
   cout << "  29: A+B Optimized V3 (K26 + templated smem + float2 A-loads)" << endl;
+  cout << "  30: A+B Compressed-K (K29 + compressed K-list + set-bit dotIdx)" << endl;
   cout << "\nKernel selection formats:" << endl;
   cout << "  Single:   25          (run K25)" << endl;
   cout << "  Multiple: \"20,21,25\" (comma-separated)" << endl;

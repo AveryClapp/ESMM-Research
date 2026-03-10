@@ -17,7 +17,7 @@ using std::cout;
 using std::endl;
 using std::cin;
 
-static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25, 26, 27, 28, 29};
+static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25, 26, 27, 28, 29, 30};
 
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
                       float* d_A, float* d_B, float* d_C,
@@ -114,6 +114,13 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
             res = run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true, skip_stats);
         } else {
             res = run_esmm_ab_optimized_v3_no_check(rows, cols, inners, d_A, d_B, d_C, runs, skip_stats);
+        }
+        break;
+    case 30: // K29 + compressed active K-block list + set-bit dotIdx iteration
+        if (check_results) {
+            res = run_esmm_ab_compressed_k(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true, skip_stats);
+        } else {
+            res = run_esmm_ab_compressed_k_no_check(rows, cols, inners, d_A, d_B, d_C, runs, skip_stats);
         }
         break;
 

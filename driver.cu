@@ -22,7 +22,8 @@ static const std::set<int> VALID_KERNELS = {14, 15, 16, 17, 20, 21, 25, 26, 27, 
 bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
                       float* d_A, float* d_B, float* d_C,
                       float* h_C, float* h_C_ref, int runs,
-                      bool verbose, bool check_results, std::string_view pattern) {
+                      bool verbose, bool check_results, std::string_view pattern,
+                      bool skip_stats = false) {
     bool res = false;
 
     // Reset d_C to zeros before each kernel
@@ -103,16 +104,16 @@ bool run_single_kernel(int kernel_choice, int rows, int cols, int inners,
         break;
     case 28: // K25 with 32-row granularity (gmem patterns, block+warp skip, float4)
         if (check_results) {
-            res = run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+            res = run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true, skip_stats);
         } else {
-            res = run_esmm_ab_gmem_32_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+            res = run_esmm_ab_gmem_32_no_check(rows, cols, inners, d_A, d_B, d_C, runs, skip_stats);
         }
         break;
     case 29: // K26 + templated MAX_K_BLOCKS + float2 A-loads
         if (check_results) {
-            res = run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs);
+            res = run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true, skip_stats);
         } else {
-            res = run_esmm_ab_optimized_v3_no_check(rows, cols, inners, d_A, d_B, d_C, runs);
+            res = run_esmm_ab_optimized_v3_no_check(rows, cols, inners, d_A, d_B, d_C, runs, skip_stats);
         }
         break;
 
@@ -151,6 +152,8 @@ int main(int argc, char *argv[]) {
     bool use_blockwise_sparsity = false;
     float random_sparsity_percent = 37.5f;
     unsigned int random_seed = 12345;
+
+    bool skip_stats = false;
 
     // Real weight loading
     std::string load_matrix_a = "";
@@ -239,6 +242,8 @@ int main(int argc, char *argv[]) {
         } else if (arg == "--load-b") {
             if (i + 1 >= argc) { cout << "Error: --load-b requires a path" << endl; return 1; }
             load_matrix_b = argv[++i];
+        } else if (arg == "--skip-stats") {
+            skip_stats = true;
         } else if (arg == "--dims") {
             if (i + 3 >= argc) { cout << "Error: --dims requires M K N" << endl; return 1; }
             load_M = atoi(argv[++i]);
@@ -439,7 +444,7 @@ int main(int argc, char *argv[]) {
     for (int kernel_choice : kernel_choices) {
         bool result = run_single_kernel(kernel_choice, rows, cols, inners,
                                        d_A, d_B, d_C, h_C, h_C_ref, runs,
-                                       verbose, check_results, sparsity);
+                                       verbose, check_results, sparsity, skip_stats);
         if (result || !check_results) passed++;
 
         if (!verbose) {

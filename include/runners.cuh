@@ -625,12 +625,92 @@ bool run_esmm_ab_optimized_v2_baseline_no_check(int rows, int cols, int inners, 
 }
 
 // ============================================================================
+// Skip Statistics Analysis (K28/K29) — computed analytically from patterns
+// Three skip levels:
+//   block: all warps in the CUDA block skip a K-tile (block_joint == 0)
+//   warp:  one warp skips a K-tile (warp joint == 0, but block_joint != 0)
+//   dot:   one K-column skipped inside the inner loop (bit 0 in joint)
+// ============================================================================
+
+static void compute_and_print_skip_stats(
+    const uint8_t* d_a_patterns,
+    const uint8_t* d_b_patterns,
+    int numCBlocksM, int numCBlocksN, int numKBlocks,
+    int NUM_WARPS_M, int NUM_WARPS_N, int BK,
+    const char* label)
+{
+    const int numMBlocks = numCBlocksM * NUM_WARPS_M;
+    const int numNBlocks = numCBlocksN * NUM_WARPS_N;
+    const int NUM_WARPS  = NUM_WARPS_M * NUM_WARPS_N;
+
+    std::vector<uint8_t> h_a(numMBlocks * numKBlocks);
+    std::vector<uint8_t> h_b(numNBlocks * numKBlocks);
+    cudaMemcpy(h_a.data(), d_a_patterns, h_a.size(), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_b.data(), d_b_patterns, h_b.size(), cudaMemcpyDeviceToHost);
+
+    long long total_k       = (long long)numCBlocksM * numCBlocksN * numKBlocks;
+    long long total_warp_k  = total_k * NUM_WARPS;
+    long long total_dot     = total_warp_k * BK;
+
+    long long block_skips = 0, warp_skips = 0, dot_skips = 0;
+
+    for (int cRow = 0; cRow < numCBlocksM; ++cRow) {
+        for (int cCol = 0; cCol < numCBlocksN; ++cCol) {
+            for (int k = 0; k < numKBlocks; ++k) {
+                uint8_t bj = 0;
+                for (int wRow = 0; wRow < NUM_WARPS_M; ++wRow)
+                    for (int wCol = 0; wCol < NUM_WARPS_N; ++wCol)
+                        bj |= h_a[(cRow*NUM_WARPS_M+wRow)*numKBlocks+k]
+                            & h_b[(cCol*NUM_WARPS_N+wCol)*numKBlocks+k];
+
+                if (bj == 0) {
+                    block_skips++;
+                    warp_skips += NUM_WARPS;
+                    dot_skips  += (long long)NUM_WARPS * BK;
+                } else {
+                    for (int wRow = 0; wRow < NUM_WARPS_M; ++wRow) {
+                        for (int wCol = 0; wCol < NUM_WARPS_N; ++wCol) {
+                            uint8_t j = h_a[(cRow*NUM_WARPS_M+wRow)*numKBlocks+k]
+                                      & h_b[(cCol*NUM_WARPS_N+wCol)*numKBlocks+k];
+                            if (j == 0) {
+                                warp_skips++;
+                                dot_skips += BK;
+                            } else {
+                                dot_skips += BK - __builtin_popcount(j);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    long long warp_beyond_block = warp_skips - block_skips * NUM_WARPS;
+    long long block_k_hit = total_k - block_skips;
+
+    printf("\n=== Skip Stats: %s ===\n", label);
+    printf("Grid: %d x %d CUDA blocks, %d K-tiles, %d warps/block, BK=%d\n",
+           numCBlocksM, numCBlocksN, numKBlocks, NUM_WARPS, BK);
+    printf("Block-level  (all warps skip K-tile):  %lld / %lld  (%.1f%%)\n",
+           block_skips, total_k, 100.0*block_skips/total_k);
+    printf("Warp-level   (one warp  skips K-tile):  %lld / %lld  (%.1f%%)  "
+           "[%lld beyond block skips, %.1f%% of non-block-skipped warp-K pairs]\n",
+           warp_skips, total_warp_k, 100.0*warp_skips/total_warp_k,
+           warp_beyond_block,
+           block_k_hit>0 ? 100.0*warp_beyond_block/(block_k_hit*NUM_WARPS) : 0.0);
+    printf("dotIdx-level (one col   skipped):        %lld / %lld  (%.1f%%)  "
+           "[%lld executed, %.1f%%]\n\n",
+           dot_skips, total_dot, 100.0*dot_skips/total_dot,
+           total_dot-dot_skips, 100.0*(total_dot-dot_skips)/total_dot);
+}
+
+// ============================================================================
 // K28: K25 with 32-row A granularity (gmem pattern reads, block+warp skip, float2 A-loads)
 //      Templated MAX_K_BLOCKS for tight smem allocation (same dispatch as K29).
 // ============================================================================
 bool run_esmm_ab_gmem_32(int rows, int cols, int inners, float *d_A, float *d_B,
                           float *d_C, float *h_C, float *h_C_ref, int runs,
-                          bool verify) {
+                          bool verify, bool print_skip_stats = false) {
   const uint NUM_THREADS = 256;
   const uint BN = 128;
   const uint BM = 64;
@@ -642,6 +722,15 @@ bool run_esmm_ab_gmem_32(int rows, int cols, int inners, float *d_A, float *d_B,
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+  if (print_skip_stats) {
+    ABPatternMetadata meta = preprocess_ab<BK, WM, WN>(d_A, d_B, rows, cols, inners);
+    compute_and_print_skip_stats(
+        meta.d_a_patterns, meta.d_b_patterns,
+        CEIL_DIV(rows, BM), CEIL_DIV(cols, BN),
+        meta.numKBlocks, BM/WM, BN/WN, BK, "K28");
+    free_ab_pattern_metadata(meta);
+  }
 
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
@@ -695,11 +784,12 @@ bool run_esmm_ab_gmem_32(int rows, int cols, int inners, float *d_A, float *d_B,
 
 bool run_esmm_ab_gmem_32(int rows, int cols, int inners, float *d_A, float *d_B,
                           float *d_C, float *h_C, float *h_C_ref, int runs) {
-  return run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true);
+  return run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true, false);
 }
 bool run_esmm_ab_gmem_32_no_check(int rows, int cols, int inners, float *d_A,
-                                   float *d_B, float *d_C, int runs) {
-  return run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, nullptr, nullptr, runs, false);
+                                   float *d_B, float *d_C, int runs,
+                                   bool print_skip_stats = false) {
+  return run_esmm_ab_gmem_32(rows, cols, inners, d_A, d_B, d_C, nullptr, nullptr, runs, false, print_skip_stats);
 }
 
 // ============================================================================
@@ -735,7 +825,7 @@ void dispatch_v3(dim3 gridDim, dim3 blockDim, int numKBlocks,
 
 bool run_esmm_ab_optimized_v3(int rows, int cols, int inners, float *d_A, float *d_B,
                                float *d_C, float *h_C, float *h_C_ref, int runs,
-                               bool verify) {
+                               bool verify, bool print_skip_stats = false) {
   const uint NUM_THREADS = 256;
   const uint BN = 128;
   const uint BM = 64;
@@ -748,6 +838,15 @@ bool run_esmm_ab_optimized_v3(int rows, int cols, int inners, float *d_A, float 
 
   dim3 blockDim(NUM_THREADS);
   dim3 gridDim(CEIL_DIV(cols, BN), CEIL_DIV(rows, BM));
+
+  if (print_skip_stats) {
+    ABPatternMetadata meta = preprocess_ab<BK, WM, WN>(d_A, d_B, rows, cols, inners);
+    compute_and_print_skip_stats(
+        meta.d_a_patterns, meta.d_b_patterns,
+        CEIL_DIV(rows, BM), CEIL_DIV(cols, BN),
+        meta.numKBlocks, BM/WM, BN/WN, BK, "K29");
+    free_ab_pattern_metadata(meta);
+  }
 
   cudaEvent_t start, stop;
   cudaEventCreate(&start);
@@ -788,9 +887,10 @@ bool run_esmm_ab_optimized_v3(int rows, int cols, int inners, float *d_A, float 
 
 bool run_esmm_ab_optimized_v3(int rows, int cols, int inners, float *d_A, float *d_B,
                                float *d_C, float *h_C, float *h_C_ref, int runs) {
-  return run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true);
+  return run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, h_C, h_C_ref, runs, true, false);
 }
 bool run_esmm_ab_optimized_v3_no_check(int rows, int cols, int inners, float *d_A,
-                                       float *d_B, float *d_C, int runs) {
-  return run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, nullptr, nullptr, runs, false);
+                                       float *d_B, float *d_C, int runs,
+                                       bool print_skip_stats = false) {
+  return run_esmm_ab_optimized_v3(rows, cols, inners, d_A, d_B, d_C, nullptr, nullptr, runs, false, print_skip_stats);
 }

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Figure 2: Ablation Study
-Grouped bars showing compute kernel time for K27, K28, K26, K29 at 3 density levels.
-Each kernel adds one optimization over the previous.
+Grouped bars showing compute kernel time for AB-Cached-32 (no block skip),
+AB-Stream-32, AB-Cached-32, and ESMM at 3 density levels.
+Each variant adds one optimization over the previous.
 """
 
 import subprocess
@@ -10,6 +11,9 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
+from paper_style import apply as apply_style, COLORS, W2
+
+apply_style()
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "benchmarks" / "paper_data"
@@ -28,17 +32,17 @@ KERNEL_DIRS = {
 }
 
 KERNEL_LABELS = {
-    27: "K27: 32-row\n(baseline)",
-    28: "K28: + block skip\n(gmem patterns)",
-    26: "K26: + smem patterns\n+ float4",
-    29: "K29: + float2\n+ templated smem ★",
+    27: "AB-Cached-32\n(no block skip)",
+    28: "AB-Stream-32\n(gmem patterns)",
+    26: "AB-Cached-32\n(+ block skip)",
+    29: "ESMM\n(+ float2 A-loads) ★",
 }
 
 KERNEL_COLORS = {
-    27: "#aec7e8",
-    28: "#ffbb78",
-    26: "#98df8a",
-    29: "#d62728",
+    27: COLORS["AB-Cached-32-noskip"],
+    28: COLORS["AB-Stream-32"],
+    26: COLORS["AB-Cached-32"],
+    29: COLORS["ESMM"],
 }
 
 
@@ -82,41 +86,37 @@ def plot():
     width = 0.18
     offsets = [-1.5, -0.5, 0.5, 1.5]
 
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    fig, ax = plt.subplots(figsize=(W2, 3.2))
 
     for i, kernel in enumerate(kernels):
         vals = [data[kernel].get(d, 0) for d in DENSITIES]
         bars = ax.bar(x + offsets[i] * width, vals, width,
                       label=KERNEL_LABELS[kernel], color=KERNEL_COLORS[kernel],
-                      edgecolor="black", linewidth=0.8,
+                      edgecolor="white", linewidth=0.5,
                       zorder=3 if kernel == 29 else 2)
 
-        # Label bars with values
         for bar, v in zip(bars, vals):
             if v > 0:
                 ax.text(bar.get_x() + bar.get_width() / 2., bar.get_height() + 0.05,
-                        f"{v:.1f}", ha="center", va="bottom", fontsize=8, fontweight="bold")
+                        f"{v:.1f}", ha="center", va="bottom", fontsize=7)
 
-    # Add improvement annotations at 12.5% density
     k27_12 = data[27].get(12.5, 0)
     k29_12 = data[29].get(12.5, 0)
     if k27_12 > 0 and k29_12 > 0:
         improvement = (k27_12 - k29_12) / k27_12 * 100
         ax.annotate(f"−{improvement:.0f}%",
                     xy=(x[0] + offsets[3] * width, k29_12),
-                    xytext=(0, -25), textcoords="offset points",
-                    fontsize=10, fontweight="bold", color="#d62728",
+                    xytext=(0, -22), textcoords="offset points",
+                    fontsize=8, fontweight="bold", color=COLORS["ESMM"],
                     ha="center",
-                    arrowprops=dict(arrowstyle="->", color="#d62728"))
+                    arrowprops=dict(arrowstyle="->", color=COLORS["ESMM"]))
 
-    ax.set_xlabel("Matrix Density (%)", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Compute Kernel Time (ms)", fontsize=12, fontweight="bold")
-    ax.set_title("Figure 2: Ablation — Contribution of Each Optimization\n(4096×4096, blockwise, compute kernel only)",
-                 fontsize=13, fontweight="bold")
+    ax.set_xlabel("Block Density (%)")
+    ax.set_ylabel("Compute Time (ms, NCU)")
+    ax.set_title("Ablation: Contribution of Each Optimization (4096\u00d74096, blockwise)")
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{d:.1f}%" for d in DENSITIES], fontsize=11)
-    ax.legend(fontsize=9, loc="upper left", framealpha=0.9)
-    ax.grid(True, alpha=0.3, axis="y")
+    ax.set_xticklabels([f"{d:.1f}%" for d in DENSITIES])
+    ax.legend(loc="upper left")
     ax.set_ylim(0, ax.get_ylim()[1] * 1.15)
 
     plt.tight_layout()

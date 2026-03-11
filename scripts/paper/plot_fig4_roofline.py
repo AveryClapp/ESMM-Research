@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from pathlib import Path
+from paper_style import apply as apply_style, COLORS, W1
+
+apply_style()
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "benchmarks" / "paper_data"
@@ -65,9 +68,9 @@ def plot():
             achieved_bw = PEAK_BW_GBS * dram / 100
             ai = achieved_gflops / achieved_bw
             points.append({
-                "label": f"K29 @ {density:.0f}%" if density == int(density) else f"K29 @ {density:.1f}%",
+                "label": f"ESMM @ {density:.0f}%" if density == int(density) else f"ESMM @ {density:.1f}%",
                 "ai": ai, "gflops": achieved_gflops,
-                "color": "#d62728", "density": density
+                "color": COLORS["ESMM"], "density": density
             })
             print(f"  K29 {density}%: AI={ai:.1f}, GFLOPS={achieved_gflops:.0f}, DRAM={dram:.1f}%, Compute={compute:.1f}%")
 
@@ -85,7 +88,7 @@ def plot():
         print(f"  cuBLAS: AI={ai:.1f}, GFLOPS={achieved_gflops:.0f}")
 
     # --- Plot ---
-    fig, ax = plt.subplots(figsize=(9, 6))
+    fig, ax = plt.subplots(figsize=(W1, 3.0))
 
     # Draw roofline ceiling
     ai_range = np.logspace(0, 3, 500)
@@ -105,19 +108,19 @@ def plot():
             ha="center", fontsize=8, color="gray")
 
     # Plot K29 points with arrow showing density progression
-    k29_points = [p for p in points if "K29" in p["label"]]
+    k29_points = [p for p in points if "ESMM" in p["label"]]
     k29_points.sort(key=lambda p: p["density"])
 
     # Draw connecting arrow
     for i in range(len(k29_points) - 1):
         ax.annotate("", xy=(k29_points[i+1]["ai"], k29_points[i+1]["gflops"]),
                      xytext=(k29_points[i]["ai"], k29_points[i]["gflops"]),
-                     arrowprops=dict(arrowstyle="-", color="#d62728", alpha=0.4, lw=1.5))
+                     arrowprops=dict(arrowstyle="-", color=COLORS["ESMM"], alpha=0.4, lw=1.5))
 
     # Plot points
     for p in points:
-        marker = "D" if "K29" in p["label"] else "s"
-        size = 120 if "K29" in p["label"] else 100
+        marker = "D" if "ESMM" in p["label"] else "s"
+        size = 120 if "ESMM" in p["label"] else 100
         ax.scatter(p["ai"], p["gflops"], s=size, marker=marker,
                    color=p["color"], edgecolors="black", linewidths=0.8, zorder=5)
         # Label
@@ -128,16 +131,15 @@ def plot():
 
     ax.set_xscale("log", base=2)
     ax.set_yscale("log", base=2)
-    ax.set_xlabel("Arithmetic Intensity (FLOP/byte)", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Achieved Performance (GFLOPS)", fontsize=12, fontweight="bold")
-    ax.set_title("Figure 4: Roofline Model (NVIDIA A10G, 4096×4096)",
-                 fontsize=13, fontweight="bold")
+    ax.set_xlabel("Arithmetic Intensity (FLOP/byte)")
+    ax.set_ylabel("Achieved Performance (GFLOPS)")
+    ax.set_title("Roofline Model (NVIDIA Ampere, 4096\u00d74096)")
     ax.grid(True, alpha=0.2, which="both")
     ax.set_xlim(4, 512)
     ax.set_ylim(1000, PEAK_GFLOPS * 1.5)
 
     # Legend
-    k29_patch = mpatches.Patch(color="#d62728", label="ESMM (ours)")
+    k29_patch = mpatches.Patch(color=COLORS["ESMM"], label="ESMM (ours)")
     cublas_patch = mpatches.Patch(color="gray", label="cuBLAS")
     ax.legend(handles=[k29_patch, cublas_patch], fontsize=10, loc="lower right")
 

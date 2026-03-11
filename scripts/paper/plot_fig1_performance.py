@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Figure 1: Performance vs Density
-K29 ★, K20 (baseline A+B), cuBLAS, cuSPARSE at 4096×4096 blockwise.
+ESMM ★, AB-Cached-64 (baseline A+B), cuBLAS, cuSPARSE at 4096×4096 blockwise.
 Dual panel: (a) Speedup over cuBLAS, (b) Absolute runtime.
 """
 
@@ -11,6 +11,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
+from paper_style import apply as apply_style, COLORS, W2
+
+apply_style()
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "benchmarks" / "paper_data"
@@ -77,12 +80,12 @@ def plot():
     cublas_time = ncu_df[ncu_df["kernel"] == 15]["time_us"].mean()
     print(f"\ncuBLAS baseline: {cublas_time:.0f} µs")
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(W2, 3.5))
 
     styles = {
-        29:         {"label": "ESMM (ours) ★", "marker": "D", "color": "#d62728", "lw": 2.5, "zorder": 5},
-        20:         {"label": "ESMM-Naïve",    "marker": "s", "color": "#9467bd", "lw": 2.0, "zorder": 4},
-        "cuSPARSE": {"label": "cuSPARSE",      "marker": "^", "color": "#2ca02c", "lw": 2.0, "zorder": 3},
+        29:         {"label": "ESMM (ours)",   "marker": "D", "color": COLORS["ESMM"],        "lw": 2.0, "zorder": 5},
+        20:         {"label": "AB-Cached-64",  "marker": "s", "color": COLORS["AB-Cached-64"],"lw": 1.5, "zorder": 4},
+        "cuSPARSE": {"label": "cuSPARSE",     "marker": "^", "color": COLORS["cuSPARSE"],    "lw": 1.5, "zorder": 3},
     }
 
     # --- Panel (a): Speedup over cuBLAS ---
@@ -110,11 +113,11 @@ def plot():
                      textcoords="offset points", fontsize=10, fontweight="bold",
                      bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.8))
 
-    ax1.set_xlabel("Matrix Density (%)", fontsize=12, fontweight="bold")
-    ax1.set_ylabel("Speedup vs cuBLAS", fontsize=12, fontweight="bold")
-    ax1.set_title("(a) Speedup vs Density", fontsize=13, fontweight="bold")
-    ax1.legend(fontsize=10, loc="upper left", framealpha=0.9)
-    ax1.grid(True, alpha=0.3)
+    ax1.set_xlabel("Matrix Density (%)")
+    ax1.set_ylabel("Speedup vs. cuBLAS")
+    ax1.set_title("(a) Speedup vs. Density")
+    ax1.legend(loc="upper left")
+    ax1.grid(True, alpha=0.25)
     ax1.set_xlim(5, 105)
     ax1.set_ylim(0, max(3.0, ax1.get_ylim()[1]))
 
@@ -133,16 +136,15 @@ def plot():
                  marker=style["marker"], linewidth=style["lw"], markersize=8,
                  label=style["label"], color=style["color"], zorder=style["zorder"])
 
-    ax2.set_xlabel("Matrix Density (%)", fontsize=12, fontweight="bold")
-    ax2.set_ylabel("Runtime (ms)", fontsize=12, fontweight="bold")
-    ax2.set_title("(b) Absolute Runtime vs Density", fontsize=13, fontweight="bold")
-    ax2.legend(fontsize=10, loc="upper left", framealpha=0.9)
-    ax2.grid(True, alpha=0.3)
+    ax2.set_xlabel("Matrix Density (%)")
+    ax2.set_ylabel("Runtime (ms)")
+    ax2.set_title("(b) Absolute Runtime vs. Density")
+    ax2.legend(loc="upper left")
+    ax2.grid(True, alpha=0.25)
     ax2.set_xlim(5, 105)
     ax2.set_yscale("log")
 
-    fig.suptitle("Figure 1: Performance vs Density (4096×4096, blockwise sparsity)",
-                 fontsize=14, fontweight="bold", y=1.02)
+    fig.suptitle("Performance vs. Density (4096\u00d74096, blockwise sparsity)", y=1.02)
     plt.tight_layout()
 
     out = OUTPUT_DIR / "fig1_performance_vs_density"

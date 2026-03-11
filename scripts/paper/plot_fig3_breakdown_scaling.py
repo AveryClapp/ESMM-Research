@@ -10,6 +10,9 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
+from paper_style import apply as apply_style, COLORS, W2
+
+apply_style()
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "benchmarks" / "paper_data"
@@ -60,7 +63,7 @@ def extract_total_time_us(ncu_rep_path):
 
 
 def plot():
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(W2, 3.2))
 
     # --- Panel (a): Preprocessing vs Compute breakdown for K29 ---
     print("Panel (a): K29 breakdown by density...")
@@ -78,9 +81,9 @@ def plot():
         print(f"  {density}%: preprocess={pre:.0f}µs, compute={comp:.0f}µs, overhead={pct:.1f}%")
 
     x = np.arange(len(densities))
-    ax1.bar(x, compute_times, label="Compute", color="#d62728", edgecolor="black", linewidth=0.5)
+    ax1.bar(x, compute_times, label="Compute", color=COLORS["ESMM"], edgecolor="white", linewidth=0.5)
     ax1.bar(x, preprocess_times, bottom=compute_times, label="Preprocessing",
-            color="#aec7e8", edgecolor="black", linewidth=0.5)
+            color=COLORS["AB-Cached-64"], edgecolor="white", linewidth=0.5)
 
     # Add overhead % labels
     for i, (pre, comp) in enumerate(zip(preprocess_times, compute_times)):
@@ -89,9 +92,9 @@ def plot():
         ax1.text(i, total + 0.15, f"{pct:.0f}%", ha="center", va="bottom",
                  fontsize=8, fontweight="bold", color="#1f77b4")
 
-    ax1.set_xlabel("Matrix Density (%)", fontsize=12, fontweight="bold")
-    ax1.set_ylabel("Runtime (ms)", fontsize=12, fontweight="bold")
-    ax1.set_title("(a) Preprocessing Overhead\n(K29, 4096×4096)", fontsize=13, fontweight="bold")
+    ax1.set_xlabel("Matrix Density (%)")
+    ax1.set_ylabel("Runtime (ms)")
+    ax1.set_title("(a) Preprocessing Overhead (ESMM, 4096\u00d74096)")
     ax1.set_xticks(x)
     ax1.set_xticklabels([f"{d:.0f}%" if d == int(d) else f"{d:.1f}%" for d in densities], fontsize=9)
     ax1.legend(fontsize=10, loc="upper left")
@@ -121,8 +124,8 @@ def plot():
 
     speedups = [c / k if k > 0 else 0 for c, k in zip(cublas_times, k29_times)]
 
-    ax2.plot(sizes, speedups, marker="D", linewidth=2.5, markersize=9,
-             label="ESMM (ours) ★", color="#d62728")
+    ax2.plot(sizes, speedups, marker="D", linewidth=2.0, markersize=5,
+             label="ESMM (ours)", color=COLORS["ESMM"])
     ax2.axhline(y=1.0, color="gray", linestyle="--", linewidth=2,
                 label="cuBLAS (dense)", zorder=1)
 
@@ -132,17 +135,16 @@ def plot():
                      textcoords="offset points", fontsize=9, fontweight="bold",
                      ha="center")
 
-    ax2.set_xlabel("Matrix Size (N×N)", fontsize=12, fontweight="bold")
-    ax2.set_ylabel("Speedup vs cuBLAS", fontsize=12, fontweight="bold")
-    ax2.set_title("(b) Size Scaling\n(25% density, blockwise)", fontsize=13, fontweight="bold")
+    ax2.set_xlabel("Matrix Size (N\u00d7N)")
+    ax2.set_ylabel("Speedup vs. cuBLAS")
+    ax2.set_title("(b) Size Scaling (25% density, blockwise)")
     ax2.set_xscale("log", base=2)
     ax2.set_xticks(sizes)
     ax2.set_xticklabels([str(s) for s in sizes])
     ax2.legend(fontsize=10, loc="upper left")
     ax2.grid(True, alpha=0.3)
 
-    fig.suptitle("Figure 3: End-to-End Analysis",
-                 fontsize=14, fontweight="bold", y=1.02)
+    fig.suptitle("End-to-End Analysis", y=1.02)
     plt.tight_layout()
 
     out = OUTPUT_DIR / "fig3_breakdown_scaling"

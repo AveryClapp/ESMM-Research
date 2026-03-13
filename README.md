@@ -31,10 +31,7 @@ sudo /usr/local/cuda-12.1/bin/ncu --set basic ./exec_prod 29 1 --blockwise --siz
 | CLI, matrix setup, verification | `driver.cu` |
 | Synthetic benchmark suite | `scripts/benchmark.py` |
 | Real LLM weight benchmark | `scripts/benchmark_real_weights.py` |
-| Benchmark results & paper notes | `results/paper_report.md` |
-| Figure plotting scripts | `scripts/experiments/plot_figure*.py` |
-| NCU benchmark data | `benchmarks/` |
-| Archived experiments | `docs/archived_experiments/` |
+| Architecture diagrams | `docs/images/` |
 
 ## Approach
 
@@ -63,12 +60,47 @@ make clean
 ```bash
 # Benchmark K29 and cuBLAS on LLM weight tensors
 python3 scripts/benchmark_real_weights.py \
-  --weights weight_permutations/ \
+  --weights /path/to/weights/ \
   --kernels 15,29 \
   --out results/real_weights_benchmark.csv
 ```
 
 Weights should be `.pt` files (2D float tensors) organized under a directory tree that encodes pruner, group size, permutation type, and sparsity in path components. See `scripts/benchmark_real_weights.py` for the expected naming convention.
+
+## Reproducing Results
+
+The key result is K29 vs cuBLAS at 4096×4096 across block densities. Build first (`make release`), then:
+
+```bash
+# Sweep block densities — reproduces the main performance curve
+# (default sparsity patterns cover 100%, 50%, 25%, 12.5%)
+python3 scripts/benchmark.py \
+  --kernel 15,29 \
+  --sizes 4096 \
+  --blockwise \
+  --runs 10
+
+# Single point: K29 vs cuBLAS at 12.5% density (expected ~2.6× speedup)
+./exec_prod 29,15 10 --blockwise --pattern 10000000 --size 4096
+```
+
+For accurate timing (wall-clock includes host overhead), use NCU to extract pure compute durations:
+
+```bash
+sudo /usr/local/cuda-12.1/bin/ncu --set basic --csv \
+  ./exec_prod 29 1 --blockwise --pattern 00010000 --size 4096
+```
+
+**Expected results at 4096×4096 (A100/similar Ampere GPU):**
+
+| Density | K29 (ms) | cuBLAS (ms) | Speedup |
+|---------|----------|-------------|---------|
+| 100%    | 12.10    | 7.19        | 0.59×   |
+| 50%     | 6.12     | 7.19        | 1.17×   |
+| 25%     | 4.04     | 7.19        | 1.78×   |
+| 12.5%   | 2.72     | 7.19        | 2.65×   |
+
+Note: these are NCU compute-only times. Total end-to-end latency (including ~375 µs preprocessing) is ~2.32× at 12.5% density. Preprocessing for B can be done offline; only A patterns are computed at inference time.
 
 ## License
 

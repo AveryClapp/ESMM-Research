@@ -2,7 +2,7 @@
 
 ESMM is a CUDA SGEMM research project exploiting *joint* block-structured sparsity in both operands. The key insight is that when both A (activations) and B (weights) have zero blocks at the same positions, that K-iteration contributes nothing to C and can be skipped entirely. This multiplicative effect makes joint sparsity far more exploitable than single-matrix sparsity.
 
-The main contribution is **K29** — a warp-tiled SGEMM kernel with block- and warp-level skipping, smem-cached joint patterns, and tight templated shared memory allocation — benchmarked against cuBLAS on real LLM weight tensors.
+The main contribution is **ESMM** — a warp-tiled SGEMM kernel with block- and warp-level skipping, smem-cached joint patterns, and tight templated shared memory allocation — benchmarked against cuBLAS on real LLM weight tensors.
 
 ## Quick Start
 
@@ -58,7 +58,7 @@ make clean
 ## Benchmarking Real Weights
 
 ```bash
-# Benchmark K29 and cuBLAS on LLM weight tensors
+# Benchmark ESMM and cuBLAS on LLM weight tensors
 python3 scripts/benchmark_real_weights.py \
   --weights /path/to/weights/ \
   --kernels 15,29 \
@@ -69,7 +69,7 @@ Weights should be `.pt` files (2D float tensors) organized under a directory tre
 
 ## Reproducing Results
 
-The key result is K29 vs cuBLAS at 4096×4096 across block densities. Build first (`make release`), then:
+The key result is ESMM vs cuBLAS at 4096×4096 across block densities. Build first (`make release`), then:
 
 ```bash
 # Sweep block densities — reproduces the main performance curve
@@ -80,7 +80,7 @@ python3 scripts/benchmark.py \
   --blockwise \
   --runs 10
 
-# Single point: K29 vs cuBLAS at 12.5% density (expected ~2.6× speedup)
+# Single point: ESMM vs cuBLAS at 12.5% density (expected ~2.6× speedup)
 ./exec_prod 29,15 10 --blockwise --pattern 10000000 --size 4096
 ```
 
@@ -93,14 +93,29 @@ sudo /usr/local/cuda-12.1/bin/ncu --set basic --csv \
 
 **Expected results at 4096×4096 (A100/similar Ampere GPU):**
 
-| Density | K29 (ms) | cuBLAS (ms) | Speedup |
-|---------|----------|-------------|---------|
-| 100%    | 12.10    | 7.19        | 0.59×   |
-| 50%     | 6.12     | 7.19        | 1.17×   |
-| 25%     | 4.04     | 7.19        | 1.78×   |
-| 12.5%   | 2.72     | 7.19        | 2.65×   |
+| Density | ESMM (ms) | cuBLAS (ms) | Speedup |
+|---------|-----------|-------------|---------|
+| 100%    | 12.10     | 7.19        | 0.59×   |
+| 50%     | 6.12      | 7.19        | 1.17×   |
+| 25%     | 4.04      | 7.19        | 1.78×   |
+| 12.5%   | 2.72      | 7.19        | 2.65×   |
 
 Note: these are NCU compute-only times. Total end-to-end latency (including ~375 µs preprocessing) is ~2.32× at 12.5% density. Preprocessing for B can be done offline; only A patterns are computed at inference time.
+
+## Citation
+
+If you use this work, please cite:
+
+```bibtex
+@misc{esmm2026,
+  title  = {ESMM: Exploiting Joint Block-Structured Sparsity in Matrix Multiplication},
+  author = {Clapp, Avery and Burns, Randal},
+  year   = {2026},
+  note   = {\url{https://github.com/AveryClapp/ESMM-Research}}
+}
+```
+
+A preprint will be linked here upon release.
 
 ## License
 

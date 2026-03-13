@@ -71,10 +71,9 @@ time_trace.json
 comparison.csv
 *.csv
 
-# Documentation (never commit docs)
+# Documentation internals
 CLAUDE.md
 CLEANUP_STATUS.md
-docs/
 
 # Temporary files
 temp_*.cu
@@ -85,14 +84,12 @@ temp_*.cu
 venv/
 env/
 
-# Large data files
+# Large data files / generated outputs
 *.zip
 weight_permutations/
 exports/
-
-# Benchmark outputs
-benchmarks/*
-!benchmarks/paper_data/
-benchmarks/paper_data/*
-!benchmarks/paper_data/*.csv
+results/
+benchmarks/
+scripts/paper/
+scripts/experiments/
 *.log

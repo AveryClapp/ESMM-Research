@@ -92,4 +92,6 @@ results/
 benchmarks/
 scripts/paper/
 scripts/experiments/
+archive/
+tuning/
 *.log

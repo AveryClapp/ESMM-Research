@@ -91,7 +91,7 @@ sudo /usr/local/cuda-12.1/bin/ncu --set basic --csv \
   ./exec_prod 29 1 --blockwise --pattern 00010000 --size 4096
 ```
 
-**Expected results at 4096×4096 (A100/similar Ampere GPU):**
+**Expected results at 4096×4096 (NVIDIA A10G, Ampere):**
 
 | Density | ESMM (ms) | cuBLAS (ms) | Speedup |
 |---------|-----------|-------------|---------|

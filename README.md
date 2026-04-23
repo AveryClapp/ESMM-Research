@@ -108,8 +108,8 @@ If you use this work, please cite:
 
 ```bibtex
 @misc{esmm2026,
-  title  = {ESMM: Exploiting Joint Block-Structured Sparsity in Matrix Multiplication},
-  author = {Clapp, Avery and Burns, Randal},
+  title  = {ESMM: Exploiting Emergent Sparsity in Matrix Multiplication for Dynamic LLM Inference},
+  author = {author = {Avery Clapp and Brian Wheatman and Meghana Madhyastha and Randal Burns},},
   year   = {2026},
   note   = {\url{https://github.com/AveryClapp/ESMM-Research}}
 }

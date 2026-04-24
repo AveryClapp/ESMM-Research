@@ -87,3 +87,31 @@ def _parse_csv_line(line: str) -> list:
         current += char
     parts.append(current.strip('"'))
     return parts
+
+
+def find_compatible_pairs(a_files: list, b_files: list) -> list:
+    """Return (a_path, b_path) tuples where A.cols == B.rows and K <= MAX_K."""
+    pairs = []
+    for a_path in a_files:
+        try:
+            a_obj = torch.load(a_path, map_location="cpu", weights_only=True)
+        except Exception:
+            continue
+        if not isinstance(a_obj, torch.Tensor) or a_obj.dim() != 2:
+            continue
+        a_K = a_obj.shape[1]
+        if a_K > MAX_K:
+            print(f"  [SKIP A] {a_path.name}: K={a_K} > {MAX_K}")
+            continue
+        for b_path in b_files:
+            if a_path == b_path:
+                continue
+            try:
+                b_obj = torch.load(b_path, map_location="cpu", weights_only=True)
+            except Exception:
+                continue
+            if not isinstance(b_obj, torch.Tensor) or b_obj.dim() != 2:
+                continue
+            if b_obj.shape[0] == a_K:
+                pairs.append((a_path, b_path))
+    return pairs

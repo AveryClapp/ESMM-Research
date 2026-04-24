@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 import numpy as np
 import pytest
+import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from benchmark_ab_real import pad_to_tile, compute_block_sparsity, BM, BK
@@ -37,3 +38,40 @@ def test_compute_block_sparsity_half():
     arr[:32, :] = 1.0    # first row of tiles is non-zero
     result = compute_block_sparsity(arr)
     assert result == pytest.approx(0.5)
+
+
+from benchmark_ab_real import find_compatible_pairs
+
+
+def _make_pt(tmp_path, name, shape):
+    """Write a fake .pt tensor file and return its Path."""
+    p = tmp_path / name
+    torch.save(torch.zeros(shape), p)
+    return p
+
+
+def test_find_compatible_pairs_matching(tmp_path):
+    a = _make_pt(tmp_path, "a_permuted.pt", (4096, 4096))
+    b = _make_pt(tmp_path, "b_permuted.pt", (4096, 4096))
+    pairs = find_compatible_pairs([a], [b])
+    assert pairs == [(a, b)]
+
+
+def test_find_compatible_pairs_shape_mismatch(tmp_path):
+    a = _make_pt(tmp_path, "a_permuted.pt", (4096, 4096))
+    b = _make_pt(tmp_path, "b_permuted.pt", (512, 4096))   # B.rows=512 != A.cols=4096
+    pairs = find_compatible_pairs([a], [b])
+    assert pairs == []
+
+
+def test_find_compatible_pairs_skips_k_too_large(tmp_path):
+    a = _make_pt(tmp_path, "a_permuted.pt", (4096, 11008))  # K=11008 > 8192
+    b = _make_pt(tmp_path, "b_permuted.pt", (11008, 4096))
+    pairs = find_compatible_pairs([a], [b])
+    assert pairs == []
+
+
+def test_find_compatible_pairs_skips_identical_path(tmp_path):
+    a = _make_pt(tmp_path, "a_permuted.pt", (4096, 4096))
+    pairs = find_compatible_pairs([a], [a])
+    assert pairs == []

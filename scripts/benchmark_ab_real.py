@@ -73,6 +73,7 @@ def parse_config(pt_path: Path) -> dict:
 
 
 def _parse_csv_line(line: str) -> list:
+    """Parse a single CSV line handling quoted commas."""
     parts = []
     current = ""
     in_quotes = False

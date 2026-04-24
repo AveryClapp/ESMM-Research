@@ -250,14 +250,16 @@ def benchmark_pair(a_path: Path, b_path: Path, kernels: list):
     print(f"  A: shape={a_orig}  elem={a_elem_sp*100:.1f}%  block={a_block_sp*100:.1f}%")
     print(f"  B: shape={b_orig}  elem={b_elem_sp*100:.1f}%  block={b_block_sp*100:.1f}%")
 
-    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fa:
-        a_tmp = fa.name
-        a_arr.astype(np.float32).tofile(fa)
-    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fb:
-        b_tmp = fb.name
-        b_arr.astype(np.float32).tofile(fb)
-
+    a_tmp = None
+    b_tmp = None
     try:
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fa:
+            a_tmp = fa.name
+            a_arr.astype(np.float32).tofile(fa)
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fb:
+            b_tmp = fb.name
+            b_arr.astype(np.float32).tofile(fb)
+
         timings = {}
         for k in kernels:
             compute_ms, preprocess_ms = run_pair(k, a_tmp, b_tmp, M_pad, K_pad, N_pad)
@@ -270,8 +272,12 @@ def benchmark_pair(a_path: Path, b_path: Path, kernels: list):
             else:
                 print(f"  {label_k}: FAILED")
     finally:
-        os.unlink(a_tmp)
-        os.unlink(b_tmp)
+        for tmp in (a_tmp, b_tmp):
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     row = {
         "a_file": a_path.stem,
@@ -384,7 +390,7 @@ def main():
                 total_speedups.append(float(r["k29_total_speedup"]))
             except (KeyError, ValueError):
                 pass
-        if compute_speedups:
+        if compute_speedups and total_speedups:
             print(f"\n{'─'*60}")
             print(f"K29 vs cuBLAS — {len(compute_speedups)} pairs (NCU timing):")
             print(f"  Compute-only: min={min(compute_speedups):.2f}x  "

@@ -14,7 +14,6 @@ Usage:
 import argparse
 import csv
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -91,6 +90,18 @@ def _parse_csv_line(line: str) -> list:
 
 def find_compatible_pairs(a_files: list, b_files: list) -> list:
     """Return (a_path, b_path) tuples where A.cols == B.rows and K <= MAX_K."""
+    b_shapes = {}
+    for b_path in b_files:
+        try:
+            b_obj = torch.load(b_path, map_location="cpu", weights_only=True)
+        except Exception as e:
+            print(f"  [SKIP B] {b_path.name}: {e}")
+            continue
+        if not isinstance(b_obj, torch.Tensor) or b_obj.dim() != 2:
+            print(f"  [SKIP B] {b_path.name}: not a 2D tensor")
+            continue
+        b_shapes[b_path] = b_obj.shape
+
     pairs = []
     for a_path in a_files:
         try:
@@ -103,15 +114,9 @@ def find_compatible_pairs(a_files: list, b_files: list) -> list:
         if a_K > MAX_K:
             print(f"  [SKIP A] {a_path.name}: K={a_K} > {MAX_K}")
             continue
-        for b_path in b_files:
+        for b_path, b_shape in b_shapes.items():
             if a_path == b_path:
                 continue
-            try:
-                b_obj = torch.load(b_path, map_location="cpu", weights_only=True)
-            except Exception:
-                continue
-            if not isinstance(b_obj, torch.Tensor) or b_obj.dim() != 2:
-                continue
-            if b_obj.shape[0] == a_K:
+            if b_shape[0] == a_K:
                 pairs.append((a_path, b_path))
     return pairs

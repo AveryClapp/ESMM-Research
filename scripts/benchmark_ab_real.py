@@ -120,3 +120,101 @@ def find_compatible_pairs(a_files: list, b_files: list) -> list:
             if b_shape[0] == a_K:
                 pairs.append((a_path, b_path))
     return pairs
+
+
+def run_pair(kernel: int, a_bin: str, b_bin: str, rows: int, inners: int, cols: int):
+    """Run kernel under NCU with both A and B loaded from binary files.
+
+    Returns (compute_ms, preprocess_ms) or (None, None) on failure.
+    """
+    tmp_dir = tempfile.mkdtemp()
+    ncu_base = os.path.join(tmp_dir, "profile")
+    ncu_rep = ncu_base + ".ncu-rep"
+
+    ncu_cmd = [
+        "sudo", NCU_PATH,
+        "--set", "basic",
+        "--target-processes", "all",
+        "--export", ncu_base,
+        "--force-overwrite",
+        str(EXEC), str(kernel),
+        "--load-a", a_bin,
+        "--load-b", b_bin,
+        "--dims", str(rows), str(inners), str(cols),
+        "--no-check",
+    ]
+
+    try:
+        result = subprocess.run(ncu_cmd, capture_output=True, text=True, timeout=300, env=NCU_ENV)
+        if result.returncode != 0:
+            print(f"    [NCU ERROR] kernel={kernel}: {result.stderr[:300]}")
+            return None, None
+
+        import_cmd = [
+            "sudo", NCU_PATH,
+            "--import", ncu_rep,
+            "--csv", "--page", "details",
+        ]
+        imp = subprocess.run(import_cmd, capture_output=True, text=True, timeout=60, env=NCU_ENV)
+        if imp.returncode != 0:
+            print(f"    [NCU IMPORT ERROR] kernel={kernel}: {imp.stderr[:200]}")
+            return None, None
+
+        compute_us = 0.0
+        preprocess_us = 0.0
+
+        lines = imp.stdout.strip().split("\n")
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+            parts = _parse_csv_line(line)
+            if len(parts) < 15:
+                continue
+
+            kernel_name = parts[4]
+            metric_name = parts[12]
+            metric_unit = parts[13]
+            metric_value_str = parts[14]
+
+            if metric_name != "Duration":
+                continue
+
+            try:
+                val = float(metric_value_str.replace(",", ""))
+            except ValueError:
+                continue
+
+            if metric_unit == "second":
+                val_us = val * 1e6
+            elif metric_unit == "msecond":
+                val_us = val * 1e3
+            else:
+                val_us = val  # usecond
+
+            kn_lower = kernel_name.lower()
+            if "preprocess" in kn_lower or "analyze" in kn_lower:
+                preprocess_us += val_us
+            else:
+                compute_us += val_us
+
+        if compute_us == 0.0:
+            print(f"    [WARN] No Duration for kernel={kernel}. stdout[:300]:\n{imp.stdout[:300]}")
+            return None, None
+
+        return compute_us / 1000.0, preprocess_us / 1000.0
+
+    except subprocess.TimeoutExpired:
+        print(f"    [NCU TIMEOUT] kernel={kernel}")
+        return None, None
+    except Exception as e:
+        print(f"    [ERROR] kernel={kernel}: {e}")
+        return None, None
+    finally:
+        try:
+            os.unlink(ncu_rep)
+        except OSError:
+            pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass

@@ -109,27 +109,15 @@ BlockPatternMetadata analyze_sparsity_pattern_gpu(float* d_A, int M, int K, int 
     dim3 blockDim(NUM_THREADS);
     dim3 gridDim(numBlocks);
 
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-
     preprocess_blockwise_patterns<8, 32, NUM_THREADS>
         <<<gridDim, blockDim>>>(M, K, d_A, meta.d_blockPatterns);
 
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-
+#ifdef DEBUG
+    cudaDeviceSynchronize();
     cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
+    if (error != cudaSuccess)
         printf("Preprocessing kernel error: %s\n", cudaGetErrorString(error));
-    }
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
+#endif
 
     return meta;
 }

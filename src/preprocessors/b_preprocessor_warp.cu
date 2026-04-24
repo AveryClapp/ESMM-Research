@@ -119,10 +119,12 @@ BMatrixPatternMetadata analyze_b_sparsity_warp_granularity(float* d_B, int K, in
     dim3 blockDim(NUM_THREADS);
     dim3 gridDim(numBlocks);
 
+#ifdef DEBUG
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
+#endif
 
     if (BK == 8 && WN == 32) {
         preprocess_b_patterns_warp_granularity<8, 32, NUM_THREADS>
@@ -131,23 +133,20 @@ BMatrixPatternMetadata analyze_b_sparsity_warp_granularity(float* d_B, int K, in
         printf("Error: Unsupported BK=%d, WN=%d combination for B warp preprocessing\n", BK, WN);
     }
 
+#ifdef DEBUG
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
-
     cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
+    if (error != cudaSuccess)
         printf("B warp-granularity preprocessing kernel error: %s\n", cudaGetErrorString(error));
-    }
-
     float metadataKB = totalBlocks / 1024.0f;
     printf("B-matrix GPU preprocessing (warp-granularity): %d blocks (%.1f KB metadata) in %.3f ms\n",
            totalBlocks, metadataKB, milliseconds);
-
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
+#endif
 
     return meta;
 }

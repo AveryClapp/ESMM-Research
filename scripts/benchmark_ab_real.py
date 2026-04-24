@@ -218,3 +218,184 @@ def run_pair(kernel: int, a_bin: str, b_bin: str, rows: int, inners: int, cols: 
             os.rmdir(tmp_dir)
         except OSError:
             pass
+
+
+def benchmark_pair(a_path: Path, b_path: Path, kernels: list):
+    """Load, pad, and benchmark one A×B weight pair. Returns a CSV row dict or None."""
+    a_cfg = parse_config(a_path)
+    b_cfg = parse_config(b_path)
+
+    a_obj = torch.load(a_path, map_location="cpu", weights_only=True)
+    b_obj = torch.load(b_path, map_location="cpu", weights_only=True)
+
+    if not isinstance(a_obj, torch.Tensor) or a_obj.dim() != 2:
+        return None
+    if not isinstance(b_obj, torch.Tensor) or b_obj.dim() != 2:
+        return None
+
+    a_arr = pad_to_tile(a_obj.float().numpy())
+    b_arr = pad_to_tile(b_obj.float().numpy())
+
+    a_orig = tuple(a_obj.shape)
+    b_orig = tuple(b_obj.shape)
+    M_pad, K_pad = a_arr.shape
+    _, N_pad = b_arr.shape
+
+    a_elem_sp = float((a_obj == 0).float().mean())
+    b_elem_sp = float((b_obj == 0).float().mean())
+    a_block_sp = compute_block_sparsity(a_arr)
+    b_block_sp = compute_block_sparsity(b_arr)
+
+    print(f"\n{a_path.stem[:35]} × {b_path.stem[:35]}")
+    print(f"  A: shape={a_orig}  elem={a_elem_sp*100:.1f}%  block={a_block_sp*100:.1f}%")
+    print(f"  B: shape={b_orig}  elem={b_elem_sp*100:.1f}%  block={b_block_sp*100:.1f}%")
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fa:
+        a_tmp = fa.name
+        a_arr.astype(np.float32).tofile(fa)
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fb:
+        b_tmp = fb.name
+        b_arr.astype(np.float32).tofile(fb)
+
+    try:
+        timings = {}
+        for k in kernels:
+            compute_ms, preprocess_ms = run_pair(k, a_tmp, b_tmp, M_pad, K_pad, N_pad)
+            timings[k] = (compute_ms, preprocess_ms)
+            label_k = "cuBLAS" if k == 15 else f"K{k}"
+            if compute_ms is not None:
+                total = compute_ms + (preprocess_ms or 0.0)
+                print(f"  {label_k}: compute={compute_ms:.3f}ms  "
+                      f"preprocess={preprocess_ms:.3f}ms  total={total:.3f}ms")
+            else:
+                print(f"  {label_k}: FAILED")
+    finally:
+        os.unlink(a_tmp)
+        os.unlink(b_tmp)
+
+    row = {
+        "a_file": a_path.stem,
+        "b_file": b_path.stem,
+        "a_pruner": a_cfg["pruner"],
+        "b_pruner": b_cfg["pruner"],
+        "a_sparsity": a_cfg["sparsity"],
+        "b_sparsity": b_cfg["sparsity"],
+        "a_block_sparsity_pct": f"{a_block_sp*100:.1f}",
+        "b_block_sparsity_pct": f"{b_block_sp*100:.1f}",
+        "a_shape": f"{a_orig[0]}x{a_orig[1]}",
+        "b_shape": f"{b_orig[0]}x{b_orig[1]}",
+    }
+
+    for k in kernels:
+        compute_ms, preprocess_ms = timings[k]
+        row[f"k{k}_compute_ms"] = f"{compute_ms:.3f}" if compute_ms is not None else "N/A"
+        row[f"k{k}_preprocess_ms"] = f"{preprocess_ms:.3f}" if preprocess_ms is not None else "N/A"
+
+    if 15 in kernels and 29 in kernels:
+        c15, _ = timings.get(15, (None, None))
+        c29, p29 = timings.get(29, (None, None))
+        if c15 and c29:
+            row["k29_compute_speedup"] = f"{c15/c29:.3f}"
+            total29 = c29 + (p29 or 0.0)
+            row["k29_total_speedup"] = f"{c15/total29:.3f}"
+        else:
+            row["k29_compute_speedup"] = "N/A"
+            row["k29_total_speedup"] = "N/A"
+
+    return row
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Benchmark ESMM on real A×B LLM weight pairs."
+    )
+    parser.add_argument("--weights-a", required=True,
+                        help="Dir containing *_permuted.pt files for A matrices")
+    parser.add_argument("--weights-b", required=True,
+                        help="Dir containing *_permuted.pt files for B matrices")
+    parser.add_argument("--kernels", default="15,29",
+                        help="Comma-separated kernel IDs (default: 15,29)")
+    parser.add_argument("--filter-a", default=None,
+                        help="Only use A files whose name contains this substring")
+    parser.add_argument("--filter-b", default=None,
+                        help="Only use B files whose name contains this substring")
+    parser.add_argument("--out", default="results/ab_real_benchmark.csv",
+                        help="Output CSV path")
+    args = parser.parse_args()
+
+    kernels = [int(k) for k in args.kernels.split(",")]
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not EXEC.exists():
+        print(f"Error: exec not found at {EXEC}. Run 'make release'.")
+        sys.exit(1)
+    if not Path(NCU_PATH).exists():
+        print(f"Error: ncu not found at {NCU_PATH}.")
+        sys.exit(1)
+
+    a_files = sorted(Path(args.weights_a).rglob("*_permuted.pt"))
+    b_files = sorted(Path(args.weights_b).rglob("*_permuted.pt"))
+
+    if args.filter_a:
+        a_files = [p for p in a_files if args.filter_a in p.name]
+    if args.filter_b:
+        b_files = [p for p in b_files if args.filter_b in p.name]
+
+    if not a_files:
+        print(f"No A files found in {args.weights_a}" +
+              (f" matching '{args.filter_a}'" if args.filter_a else ""))
+        sys.exit(1)
+    if not b_files:
+        print(f"No B files found in {args.weights_b}" +
+              (f" matching '{args.filter_b}'" if args.filter_b else ""))
+        sys.exit(1)
+
+    pairs = find_compatible_pairs(a_files, b_files)
+    if not pairs:
+        print("No compatible A×B pairs found (check shapes and K limit).")
+        sys.exit(1)
+
+    print(f"A files: {len(a_files)} | B files: {len(b_files)} | "
+          f"Compatible pairs: {len(pairs)} | kernels={kernels} | exec={EXEC.name} | ncu=ON")
+    print("─" * 100)
+
+    rows_out = []
+    fieldnames = None
+    for a_path, b_path in pairs:
+        row = benchmark_pair(a_path, b_path, kernels)
+        if row:
+            rows_out.append(row)
+            if fieldnames is None:
+                fieldnames = list(row.keys())
+            with open(out_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows_out)
+
+    if 15 in kernels and 29 in kernels:
+        compute_speedups, total_speedups = [], []
+        for r in rows_out:
+            try:
+                compute_speedups.append(float(r["k29_compute_speedup"]))
+            except (KeyError, ValueError):
+                pass
+            try:
+                total_speedups.append(float(r["k29_total_speedup"]))
+            except (KeyError, ValueError):
+                pass
+        if compute_speedups:
+            print(f"\n{'─'*60}")
+            print(f"K29 vs cuBLAS — {len(compute_speedups)} pairs (NCU timing):")
+            print(f"  Compute-only: min={min(compute_speedups):.2f}x  "
+                  f"max={max(compute_speedups):.2f}x  "
+                  f"mean={sum(compute_speedups)/len(compute_speedups):.2f}x")
+            print(f"  Total (incl. preprocess): min={min(total_speedups):.2f}x  "
+                  f"max={max(total_speedups):.2f}x  "
+                  f"mean={sum(total_speedups)/len(total_speedups):.2f}x")
+
+    print(f"\nResults saved to {out_path}  ({len(rows_out)} rows)")
+
+
+if __name__ == "__main__":
+    main()
